@@ -100,7 +100,7 @@ def parse_recipe(recipe,keys,primary):
     tasks = []
     for key in keys:
         try:
-            if key in SKIP_KEYS:
+            if key in SKIP_KEYS or 'model_ema' in key:
                 tasks.append(create_task(key,'checkpoint',primary))
             elif key in recipe:
                 tasks.append(create_task(key,*list(recipe[key].items())[0]))
@@ -116,7 +116,8 @@ def parse_recipe(recipe,keys,primary):
 def prepare_merge(recipe):
     checkpoints = recipe['checkpoints']
     tasks_recipe = recipe['targets']
-    primary = list(recipe['primary_checkpoint'].keys())[0]
+    primary = recipe['primary_checkpoint']
+    print(primary)
     with safe_open_multiple(checkpoints,device=cmn.device) as cmn.loaded_checkpoints:
         state_dict_keys = cmn.loaded_checkpoints[primary].keys()
 
@@ -135,8 +136,6 @@ def initialize_merge(taskinfo):
 
     if cmn.low_vram:
         tensor = tensor.detach().cpu()
-        #Probably not helpful but needs testing:
-        #torch.cuda.empty_cache()
     devices.torch_gc()
     return (taskinfo.key,tensor)
 

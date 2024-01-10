@@ -1,5 +1,5 @@
 import gradio as gr
-import os,yaml,torch,time
+import os,yaml,torch,time,re
 from modules import ui_components,sd_models,script_callbacks,scripts,shared,paths,paths_internal,devices,sd_unet,sd_hijack,sd_models_config,timer
 from modules.ui_common import create_refresh_button
 from scripts.merging.merger import prepare_merge
@@ -18,45 +18,60 @@ def on_ui_tabs():
     with gr.Blocks() as ui:
         with gr.Column():
             with gr.Row():
-                """model_a = gr.Dropdown(checkpoints_no_pickles(), label="Primary model (A)")
-                create_refresh_button(model_a, sd_models.list_models, lambda: {"choices": checkpoints_no_pickles()}, "refresh_checkpoint_A")
+                model_a = gr.Dropdown(checkpoints_no_pickles(), label="model_a")
                 swap_models_AB = gr.Button(value='⇆', elem_classes=["tool"])
 
-                model_b = gr.Dropdown(checkpoints_no_pickles(), label="Secondary model (B)")
-                create_refresh_button(model_b, sd_models.list_models, lambda: {"choices": checkpoints_no_pickles()}, "refresh_checkpoint_B")
+                model_b = gr.Dropdown(checkpoints_no_pickles(), label="model_b")
                 swap_models_BC = gr.Button(value='⇆', elem_classes=["tool"])
 
-                model_c = gr.Dropdown(checkpoints_no_pickles(), label="Tertiary model (C)")
-                create_refresh_button(model_c, sd_models.list_models, lambda: {"choices": checkpoints_no_pickles()}, "refresh_checkpoint_C")"""
+                model_c = gr.Dropdown(checkpoints_no_pickles(), label="model_c")
+                create_refresh_button([model_a,model_b,model_c], lambda:None,lambda: {"choices": checkpoints_no_pickles()},"refresh_checkpoints")
+
+                def swapvalues(x,y): return gr.update(value=y), gr.update(value=x)
+                swap_models_AB.click(fn=swapvalues,inputs=[model_a,model_b],outputs=[model_a,model_b])
+                swap_models_BC.click(fn=swapvalues,inputs=[model_b,model_c],outputs=[model_b,model_c])
+            with gr.Row():
+                alpha = gr.Slider(minimum=-1,maximum=2,label="alpha",value=0.5)
+                beta = gr.Slider(minimum=-1,maximum=2,label="beta",value=0.5)
+                gamma = gr.Slider(minimum=-1,maximum=2,label="gamma",value=0.5)
+
             status = gr.Textbox(max_lines=1,label="",info="")
             recipe = gr.Code(value=EXAMPLE,lines=30,language='yaml',label='Recipe')
+
             mergebutton = gr.Button(value='Merge',variant='primary')
-            mergebutton.click(fn=start_merge, inputs=recipe,outputs=status)
+            mergebutton.click(fn=start_merge, inputs=[recipe,model_a,model_b,model_c,alpha,beta,gamma],outputs=status)
+            
     return [(ui, "Untitled merger", "untitled_merger")]
 
 script_callbacks.on_ui_tabs(on_ui_tabs)
 
-def start_merge(recipe_str):
+
+def start_merge(recipe_str,model_a,model_b,model_c,alpha,beta,gamma):
     start_time = time.time()
+    
+    model_variables = {'model_a':model_a,'model_b':model_b,'model_c':model_c}
+
+    for variable, sub in {'alpha':alpha,'beta':beta,'gamma':gamma}.items():
+        recipe_str = re.sub(f"\\b{variable}\\b",str(sub),recipe_str,flags=re.I|re.M)
+
     recipe = yaml.safe_load(recipe_str)
 
-    secondary_checkpoints = recipe.get('checkpoints') or {}
+    additional_models = recipe.get('checkpoints') or {}
     checkpoints = {}
-
-    for alias,identifier in {**recipe['primary_checkpoint'], **secondary_checkpoints}.items():
-        filename = sd_models.get_closet_checkpoint_match(identifier).filename
+    for alias,name in {**model_variables, **additional_models}.items():
+        filename = sd_models.get_closet_checkpoint_match(name).filename
         assert filename.endswith('.safetensors'), 'This extension only supports safetensors checkpoints'
         checkpoints[alias] = filename
     
     recipe['checkpoints'] = checkpoints
-
+    recipe['primary_checkpoint'] = list(checkpoints.keys())[0]
     sd_models.unload_model_weights(shared.sd_model)
     devices.torch_gc()
 
     #Merge starts here:
     state_dict = prepare_merge(recipe)
 
-    checkpoint_info = sd_models.get_closet_checkpoint_match(list(recipe['primary_checkpoint'].values())[0])
+    checkpoint_info = sd_models.get_closet_checkpoint_match(os.path.basename(list(checkpoints.values())[0]))
  
     #new_cpi = modifycpinfo(checkpoint_info)
 

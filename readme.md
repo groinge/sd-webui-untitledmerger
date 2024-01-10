@@ -8,3 +8,4 @@ Bullet points:
 Note:
 - Only supports safetensors.
 - Currently only has 'ALL:' and state_dict keys (e.g.cond_stage_model.transformer.text_model.encoder.layers.4.mlp.fc1.bias) as targets 
+- Supports multithreading for a moderate performance improvement.

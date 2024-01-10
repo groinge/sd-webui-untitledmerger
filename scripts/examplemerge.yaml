@@ -1,19 +1,17 @@
 #currently supported calcmodes: weight_sum, add, sub, traindiff
-primary_checkpoint:
-  #The primary checkpoint determines the structure of the merged checkpoint, and is used as a fallback if the others are missing keys.
-  dreamshaper: dreamshaper_8.safetensors
-checkpoints:
-  #arbitrary alias and the base name of the checkpoint
-  sd1.5: v1-5-pruned-fp16.safetensors
-  counterfeit: CounterfeitV30_v30.safetensors
 targets:
   'ALL.':
     add:
-      multiplier: 1
+      multiplier: alpha
       sources:
-        checkpoint_a: dreamshaper
+        checkpoint_a: model_a
         traindiff:
           sources:
-            checkpoint_a: dreamshaper
-            checkpoint_b: counterfeit
-            checkpoint_c: sd1.5
+            checkpoint_a: model_a
+            checkpoint_b: model_b
+            checkpoint_c: model_c
+#additional models can be included in the merge by adding them to "checkpoints:":
+#checkpoints:
+# sd15: v1-5_pruned.fp16.safetensors
+#
+#the alias (sd15) is used instead of the filename to reference the model in the recipe
