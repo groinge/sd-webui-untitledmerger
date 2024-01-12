@@ -1,8 +1,12 @@
-#currently supported calcmodes: weight_sum, add, sub, traindiff
+#currently supported calcmodes: weight_sum, add, sub, traindiff,extract
+#
+#You can select larger sections of the model using these base targets: "all", "clip", "unet", "in", "mid" and "out"
+#you can further specify elements and blocks in a similar fashion to supergmerger, e.g. "IN07" is "in.7" in this, "IN07:attn2" is "in.7.attn2". Mre specific target override looser targets
+#only parts of the model not targeted by the recipe will not be merged
 targets:
-  'ALL.':
+  'all':
     add:
-      multiplier: alpha
+      alpha: slider_a #this can be a slider or a number 
       sources:
         checkpoint_a: model_a
         traindiff:

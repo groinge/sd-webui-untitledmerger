@@ -1,7 +1,6 @@
 from torch import float16
 from modules import devices
 
-#improves performance but has vastly diminishing returns as the main bottlenecks are cuda and storage speed
 threads = 12
 
 device = devices.get_optimal_device_name()
@@ -15,4 +14,6 @@ tensor_cache = None
 low_vram = False
 
 loaded_checkpoints = None
-operators = {}
+
+primary = ""
+last_merge_tasks = tuple()

@@ -1,4 +1,4 @@
-Checkpoint merger with infinitely branching per-tensor merging with readable recipes stored in yaml.
+Checkpoint merger with infinitely branching per-tensor merging with recipes stored in yaml.
 
 Bullet points:
 - Reduced memory usage by utilizing safetensors' lazy loading instead of having source checkpoints stored in memory.
@@ -7,5 +7,4 @@ Bullet points:
 
 Note:
 - Only supports safetensors.
-- Currently only has 'ALL:' and state_dict keys (e.g.cond_stage_model.transformer.text_model.encoder.layers.4.mlp.fc1.bias) as targets 
 - Supports multithreading for a moderate performance improvement.
