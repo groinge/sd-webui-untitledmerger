@@ -1,5 +1,3 @@
-Checkpoint merger with infinitely branching per-tensor merging with recipes stored in yaml.
-
 Bullet points:
 - Capable of reusing calculations from recent merges to greatly improve merge times
 - Supports multithreading for a moderate performance improvement.
@@ -7,3 +5,6 @@ Bullet points:
 
 Note:
 - Only supports safetensors.
+
+Requirements:
+- webui 1.7.0 or higher

@@ -34,11 +34,7 @@ OPERATORS = {'add': oper.add,
              'extract': oper.extract_super
              }
 
-OPERATORS_TO_CACHE = [oper.traindiff,oper.extract_super]
-
-
 #Hashable merge info that is used as keys for the cache
-#should probably just make it a namedtuple
 class TaskInfo:
     def __init__(self,key, task, args, sources):
         self.key = key
@@ -46,19 +42,23 @@ class TaskInfo:
         self.args_keys = tuple(args.keys())
         self.args_values = tuple(args.values())
         self.sources = tuple(sources)
+        self.hash = hash((self.key, self.task, self.args_keys, self.args_values, self.sources))
 
     def __hash__(self):
-        return hash((self.key, self.task, self.args_keys, self.args_values, self.sources))
+        return self.hash
 
     def __eq__(self, other):
         return self.key == other.key and self.task == other.task and self.args_keys == other.args_keys and self.args_values == other.args_values and self.sources == other.sources
+    
+    def __call__(self):
+        return self.task(self)
     
     def __getitem__(self,key):
         i = self.args_keys.index(key)
         return self.args_values[i]
 
 
-def create_task(key, task_input, args):
+def create_task(key, task_input, args) -> TaskInfo: 
     readied_sources = []
     task_name = re.match(r"[a-z\-]*",task_input).group()
     
@@ -108,16 +108,17 @@ class tCache:
             tensor = self.cache.popitem(last=False)[1]
             self.footprint -= tensor_size(tensor)
 
-def tensor_size(t):
+def tensor_size(t: torch.Tensor) -> int:
     return t.element_size() * t.nelement()
 
 cmn.tensor_cache = tCache(cmn.cache_size)
 
 
-def prepare_merge(recipe):
+def prepare_merge(recipe,timer) -> dict:
     checkpoints = recipe['checkpoints']
     tasks_recipe = recipe['targets']
     cmn.primary = os.path.basename(recipe['primary_checkpoint'])
+    
     with safe_open_multiple(checkpoints,device=cmn.device) as cmn.loaded_checkpoints:
         state_dict_keys = cmn.loaded_checkpoints[cmn.primary].keys()
 
@@ -125,25 +126,11 @@ def prepare_merge(recipe):
         tasks_copy = copy(tasks)
 
         state_dict = {}
-        #Reuses merged tensors from the last merge's loaded model, if possible
+        #Reuse merged tensors from the last merge's loaded model, if possible
         if shared.sd_model.sd_checkpoint_info.name_for_extra == str(hash(cmn.last_merge_tasks)):
-            intersected = set(cmn.last_merge_tasks).intersection(set(tasks))
-            if intersected:
-                 with torch.no_grad():
-                    
-                    #clear loras from model
-                    for module in shared.sd_model.modules():
-                        networks.network_restore_weights_from_backup(module)
-
-                    sd_hijack.model_hijack.undo_hijack(shared.sd_model)
-
-                    old_state_dict = shared.sd_model.state_dict()
-                    for task in intersected:
-                        try:
-                            state_dict[task.key] = old_state_dict[task.key]
-                        except:pass
-                        tasks.remove(task)
-                    del old_state_dict
+            state_dict,tasks = get_tensors_from_model(state_dict,tasks)
+        
+        timer.record('Prepare merge')
 
         with ThreadPoolExecutor(max_workers=cmn.threads) as executor:
             results = executor.map(initialize_merge,tasks)
@@ -151,11 +138,12 @@ def prepare_merge(recipe):
     cmn.last_merge_tasks = tuple(tasks_copy)
 
     state_dict.update(dict(results))
-            
+    
+    timer.record('Merge')
     return state_dict
 
 
-def parse_recipe(recipe,keys,primary):
+def parse_recipe(recipe,keys,primary) -> list:
     tasks = []
 
     assigned_keys = assign_keys_to_targets(list(recipe.keys()),keys)
@@ -170,35 +158,17 @@ def parse_recipe(recipe,keys,primary):
     return tasks
 
 
-def initialize_merge(taskinfo):
+def initialize_merge(taskinfo) -> tuple:
     try:
-        tensor = merge(taskinfo)
+        tensor = taskinfo()
     except SafetensorError:
-        print(taskinfo['filename'])
         tensor = cmn.loaded_checkpoints[cmn.primary].get_tensor(taskinfo.key)
 
     if cmn.low_vram:
         tensor = tensor.detach().cpu()
-    devices.torch_gc()
+    #devices.torch_gc()
     #torch.cuda.empty_cache()
     return (taskinfo.key, tensor)
-
-
-def merge(taskinfo:TaskInfo):
-    try:
-        return cmn.tensor_cache.retrieve(taskinfo)
-    except KeyError:pass
-
-    source_tensors = []
-    for source in taskinfo.sources:
-        source_tensors.append(merge(source))
-
-    result = taskinfo.task(*source_tensors,taskinfo)
-    
-    if taskinfo.task in OPERATORS_TO_CACHE:
-        cmn.tensor_cache.append(taskinfo,result)
-
-    return result
 
 
 #Tensors are loaded lazily throughout the merge, both to save memory and reduce code complexity. Pickletensors are not supported due to their high overhead.
@@ -235,8 +205,7 @@ BASE_SELECTORS_PRIORITY = {
     "out":  2,
     "mid":  2
 }
-
-def assign_keys_to_targets(targets,keys):
+def assign_keys_to_targets(targets,keys) -> dict:
     target_assigners = []
     keystext = "\n".join(keys)+"\n"
 
@@ -252,14 +221,28 @@ def assign_keys_to_targets(targets,keys):
         priority += len(target)
 
         for selector in target:
-            if selector.isnumeric():
-                regex += f"\\D*\\.{selector}\\."
+            #Check if the selector qualifies as a number
+            if re.search(r'^[\d,-]*$',selector):
+                
+                #Turns number inputs like "2-5,10" in to "2|3|4|5|10"
+                splitnumeric = set(selector.split(','))
+                for segment in splitnumeric.copy():
+                    if '-' in segment:
+                        a, b = segment.split('-')
+                        valuerange = [str(i) for i in range(int(a),int(b)+1)]
+                        splitnumeric.remove(segment)
+                        splitnumeric.update(valuerange)
+                formattedselector = '|'.join(splitnumeric)
+
+                regex += f"\\D*\\.(?:{formattedselector})\\."
             else:
                 regex += f".*{selector}"
 
         regex += ".*$"
         target_assigners.append((priority,target_name,regex))
     
+    #Sorts the selectors according to the priority of the base selector + the number of segments in the target. 
+    #This is to give more specific targets priority when assigning keys, unfortunately this system is kinda imperfect
     target_assigners.sort(key=lambda x:x[0],reverse=True)
     
     assigned_keys = dict()
@@ -273,3 +256,21 @@ def assign_keys_to_targets(targets,keys):
 
         assigned_keys.update(target_dict)
     return assigned_keys
+
+
+def get_tensors_from_model(state_dict,tasks) -> dict:
+        intersected = set(cmn.last_merge_tasks).intersection(set(tasks))
+        if intersected:
+            #clear loras from model
+            with torch.no_grad():
+                for module in shared.sd_model.modules():
+                    networks.network_restore_weights_from_backup(module)
+            old_state_dict = shared.sd_model.state_dict()
+
+            for task in intersected:
+                try:
+                    state_dict[task.key] = old_state_dict[task.key]
+                except:pass
+                tasks.remove(task)
+            
+        return state_dict,tasks

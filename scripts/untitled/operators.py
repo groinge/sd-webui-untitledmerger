@@ -1,30 +1,77 @@
 import torch
 import scripts.common as cmn
 
-def load_tensor(taskinfo):
+###DECORATORS####
+
+def recursion(func):
+    def inner(taskinfo):
+        source_tensors = []
+        for source_taskinfo in taskinfo.sources:
+            source_tensors.append(source_taskinfo())
+
+        return func(*source_tensors,taskinfo)
+    return inner
+
+
+def cache_operation(func):
+    def inner(taskinfo):
+        try:
+            return cmn.tensor_cache.retrieve(taskinfo)
+        except KeyError:pass
+
+        result = func(taskinfo)
+
+        cmn.tensor_cache.append(taskinfo,result)
+        return result
+    return inner
+
+
+###OPERATORS####
+
+def load_tensor(taskinfo) -> torch.Tensor:
     key = taskinfo.key
     fname = taskinfo['filename']
     return cmn.loaded_checkpoints[fname].get_tensor(key)
 
 
-def weight_sum(a,b,taskinfo):
+@recursion
+def weight_sum(a,b,taskinfo) -> torch.Tensor:
     mult_b = taskinfo['alpha']
     mult_a = 1-mult_b
 
     return a*mult_a + b*mult_b
 
 
-def add(a,b,taskinfo):
+@recursion
+def add(a,b,taskinfo) -> torch.Tensor:
     mult = taskinfo['alpha']
     return a + b * mult
 
 
-def sub(a,b,taskinfo):
+@cache_operation
+@recursion
+def sub(a,b,taskinfo) -> torch.Tensor:
     return a - b
 
 
-#From https://github.com/hako-mikan/sd-webui-supermerger
-def traindiff(a,b,c,taskinfo):
+#Bespoke caching and recursion logic to let the difference operation be cached independantly of the adding step
+#Allows the weight to be adjusted without having to redo the entire calculation.
+def traindiff(taskinfo) -> torch.Tensor:
+    source_a,source_b,source_c = taskinfo.sources
+    a = source_a()
+
+    alpha = taskinfo['alpha']
+    taskinfo.values = tuple()
+
+    try:
+        result = cmn.tensor_cache.retrieve(taskinfo)
+        return a+result*alpha
+    except KeyError:pass
+
+    b = source_b()
+    c = source_c()
+
+    #From https://github.com/hako-mikan/sd-webui-supermerger
     if torch.allclose(b.float(), c.float(), rtol=0, atol=0):
         return torch.zeros_like(a)
 
@@ -40,11 +87,16 @@ def traindiff(a,b,c,taskinfo):
     scale = sign_scale * torch.abs(scale)
 
     new_diff = scale * torch.abs(diff_AB)
-    return new_diff *1.8
+    result = new_diff *1.8
+    cmn.tensor_cache.append(taskinfo,result)
+
+    return a + result.to(cmn.precision) * alpha
 
 
-def extract_super(a: torch.Tensor, b: torch.Tensor, taskinfo) -> torch.Tensor:
-    base = None
+#From https://github.com/hako-mikan/sd-webui-supermerger
+@cache_operation
+@recursion
+def extract_super(base: torch.Tensor,a: torch.Tensor, b: torch.Tensor, taskinfo) -> torch.Tensor:
     alpha = taskinfo['alpha']
     beta = taskinfo['beta']
     gamma = taskinfo['gamma']
