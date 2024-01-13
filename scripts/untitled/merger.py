@@ -44,6 +44,9 @@ class TaskInfo:
         self.sources = tuple(sources)
         self.hash = hash((self.key, self.task, self.args_keys, self.args_values, self.sources))
 
+    def update_hash(self):
+        self.hash = hash((self.key, self.task, self.args_keys, self.args_values, self.sources))
+
     def __hash__(self):
         return self.hash
 
@@ -126,7 +129,7 @@ def prepare_merge(recipe,timer) -> dict:
         tasks_copy = copy(tasks)
 
         state_dict = {}
-        #Reuse merged tensors from the last merge's loaded model, if possible
+        #Reuse merged tensors from the last merge's loaded model, if availible
         if shared.sd_model.sd_checkpoint_info.name_for_extra == str(hash(cmn.last_merge_tasks)):
             state_dict,tasks = get_tensors_from_model(state_dict,tasks)
         
@@ -136,7 +139,6 @@ def prepare_merge(recipe,timer) -> dict:
             results = executor.map(initialize_merge,tasks)
     
     cmn.last_merge_tasks = tuple(tasks_copy)
-
     state_dict.update(dict(results))
     
     timer.record('Merge')
@@ -166,27 +168,9 @@ def initialize_merge(taskinfo) -> tuple:
 
     if cmn.low_vram:
         tensor = tensor.detach().cpu()
-    #devices.torch_gc()
+    devices.torch_gc()
     #torch.cuda.empty_cache()
     return (taskinfo.key, tensor)
-
-
-#Tensors are loaded lazily throughout the merge, both to save memory and reduce code complexity. Pickletensors are not supported due to their high overhead.
-class safe_open_multiple(object):
-    def __init__(self,checkpoints,device):
-        self.checkpoints = checkpoints
-        self.device = device
-        self.open_files = {}
-     
-    def __enter__(self):
-        for filename in self.checkpoints:
-            self.open_files[os.path.basename(filename)] = safe_open(filename,framework='pt',device=self.device)
-        return self.open_files
-
-    def __exit__(self,*args):
-        for file in self.open_files.values():
-            file.__exit__(*args)
-
 
 BASE_SELECTORS = {
     "all":  "",
@@ -274,3 +258,20 @@ def get_tensors_from_model(state_dict,tasks) -> dict:
                 tasks.remove(task)
             
         return state_dict,tasks
+
+#Tensors are loaded lazily throughout the merge, both to save memory and reduce code complexity. Pickletensors are not supported due to their high overhead.
+class safe_open_multiple(object):
+    def __init__(self,checkpoints,device):
+        self.checkpoints = checkpoints
+        self.device = device
+        self.open_files = {}
+     
+    def __enter__(self):
+        for filename in self.checkpoints:
+            self.open_files[os.path.basename(filename)] = safe_open(filename,framework='pt',device=self.device)
+        return self.open_files
+
+    def __exit__(self,*args):
+        for file in self.open_files.values():
+            file.__exit__(*args)
+

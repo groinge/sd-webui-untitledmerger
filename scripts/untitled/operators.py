@@ -1,5 +1,6 @@
 import torch
 import scripts.common as cmn
+from copy import deepcopy
 
 ###DECORATORS####
 
@@ -60,20 +61,22 @@ def traindiff(taskinfo) -> torch.Tensor:
     source_a,source_b,source_c = taskinfo.sources
     a = source_a()
 
-    alpha = taskinfo['alpha']
-    taskinfo.values = tuple()
+    new_taskinfo = deepcopy(taskinfo)
+    new_taskinfo.args_values = tuple()
+    new_taskinfo.update_hash()
 
     try:
-        result = cmn.tensor_cache.retrieve(taskinfo)
-        return a+result*alpha
-    except KeyError:pass
+        result = cmn.tensor_cache.retrieve(new_taskinfo)
+        return a+result*taskinfo['alpha']
+    except KeyError:
+        pass
 
     b = source_b()
     c = source_c()
 
     #From https://github.com/hako-mikan/sd-webui-supermerger
     if torch.allclose(b.float(), c.float(), rtol=0, atol=0):
-        return torch.zeros_like(a)
+        return a
 
     diff_AB = b.float() - c.float()
 
@@ -87,14 +90,14 @@ def traindiff(taskinfo) -> torch.Tensor:
     scale = sign_scale * torch.abs(scale)
 
     new_diff = scale * torch.abs(diff_AB)
-    result = new_diff *1.8
-    cmn.tensor_cache.append(taskinfo,result)
+    result = new_diff.to(cmn.precision)  *1.8
 
-    return a + result.to(cmn.precision) * alpha
+    cmn.tensor_cache.append(new_taskinfo,result)
+
+    return a + result * taskinfo['alpha']
 
 
 #From https://github.com/hako-mikan/sd-webui-supermerger
-@cache_operation
 @recursion
 def extract_super(base: torch.Tensor,a: torch.Tensor, b: torch.Tensor, taskinfo) -> torch.Tensor:
     alpha = taskinfo['alpha']

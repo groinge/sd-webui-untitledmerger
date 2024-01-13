@@ -16,17 +16,6 @@ with open(ext2abs('scripts','examplemerge.yaml'), 'r') as file:
 
 CALCMODENAMES = ('Weight-sum', 'Add difference', 'Train Difference', 'Extract')
 
-visualize_slider = """(x) => {
-    const sliders = document.getElementsByClassName('$$$');
-
-    for (let i = 0; i < sliders.length; i++) {
-        let slider = sliders[i].querySelector('[name="cowbell"]');
-        if (slider.disabled) {
-            slider.value = x;
-        }
-    }
-}"""
-
 def on_ui_tabs():
     with gr.Blocks() as ui:
         with ui_components.ResizeHandleRow():
@@ -68,10 +57,16 @@ def on_ui_tabs():
                     emptycachebutton = gr.Button(value='Empty Cache')
                 
                 #### BLOCK SLIDERS
+                    
+                with gr.Row():
+                    enable_all = gr.Button(value="enable all")
+                    disable_all = gr.Button(value="disble all")
                 with gr.Row():
                     blocksliderclass =  "blockslider"
+                    checkboxeslist = []
 
                     def createsliders(side):
+                        global blocksliders
                         sliders = {}
                         checkboxes = []
 
@@ -90,29 +85,33 @@ def on_ui_tabs():
                                     cmn.slidervalues[name][1] = slider
 
                                 slider.release(fn=updateslidervalue,inputs=slider)
-                                chkbox.input(fn=toggleinteractive,inputs=chkbox,outputs=slider)
+                                chkbox.change(fn=toggleinteractive,inputs=chkbox,outputs=slider,queue=False)
+
+                                checkboxeslist.append(chkbox)
 
                                 cmn.slidervalues[name] = [False,0.5]
                                 sliders[name] = slider
                                 checkboxes.append(chkbox)
                         return sliders
                     
-                    blocksliders = {}
 
                     with gr.Column(scale=2,min_width=0):pass
 
                     with gr.Column(scale=4):
-                        blocksliders.update( createsliders('in.') )
+                        createsliders('in.')
 
                     with gr.Column(scale=1,min_width=0):pass
    
                     with gr.Column(scale=4):
-                        blocksliders.update( createsliders('out.') )
+                        createsliders('out.')
                             
                     with gr.Column(scale=2,min_width=0):pass
-                    
 
-                alpha.release(fn=None,_js=visualize_slider.replace('$$$',blocksliderclass),inputs=alpha)
+                    def set_checkboxes(value):
+                        return [gr.update(value=value)]*len(checkboxeslist)
+                    
+                    enable_all.click(fn = lambda: set_checkboxes(True),outputs=checkboxeslist,queue=False)
+                    disable_all.click(fn = lambda: set_checkboxes(False),outputs=checkboxeslist,queue=False)
 
             with gr.Column():
                 result_gallery, html_info_x, html_info, html_log = create_output_panel("txt2img", shared.opts.outdir_txt2img_samples)    
@@ -246,11 +245,13 @@ def start_merge(recipe):
     print(message)
     return message
 
+
 def clear_cache():
     cmn.tensor_cache.__init__(cmn.cache_size)
     gc.collect()
     devices.torch_gc()
     torch.cuda.empty_cache()
+
 
 def load_merged_state_dict(state_dict,checkpoint_info):
     config = sd_models_config.find_checkpoint_config(state_dict, checkpoint_info)
@@ -269,8 +270,3 @@ def load_merged_state_dict(state_dict,checkpoint_info):
     else:
         sd_models.model_data.__init__()
         sd_models.load_model(checkpoint_info=checkpoint_info, already_loaded_state_dict=state_dict)
-
-
-
-
-

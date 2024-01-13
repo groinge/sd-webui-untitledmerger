@@ -11,11 +11,11 @@ cache_size = 1024*1024*1024*4
 tensor_cache = None
 
 #moves finished tensors to CPU during merge to save video memory (slower)
-low_vram = True
+low_vram = False
 
 loaded_checkpoints = None
-
 primary = ""
+
 last_merge_tasks = tuple()
 
 #Components
