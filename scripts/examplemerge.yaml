@@ -1,21 +1,6 @@
-#currently supported calcmodes: weight_sum, add, sub, traindiff,extract
-#
-#You can select larger sections of the model using these base targets: "all", "clip", "unet", "in", "mid" and "out"
-#you can further specify elements and blocks in a similar fashion to supergmerger, e.g. "IN07" is "in.7" in this, "IN07:attn2" is "in.7.attn2". Mre specific target override looser targets
-#only parts of the model not targeted by the recipe will not be merged
+#The multipliers in this only apply to alpha (What slider_a controls), you can use slider_b or slider_c instead of numbers to use them to adjust alpha on the target.
+#And don't remove 'targets:', it's loading-bearing.
 targets:
-  'all':
-    add:
-      alpha: slider_a #this can be a slider or a number 
-      sources:
-        checkpoint_a: model_a
-        traindiff:
-          sources:
-            checkpoint_a: model_a
-            checkpoint_b: model_b
-            checkpoint_c: model_c
-#additional models can be included in the merge by adding them to "checkpoints:":
-#checkpoints:
-# sd15: v1-5_pruned.fp16.safetensors
-#
-#the alias (sd15) is used instead of the filename to reference the model in the recipe
+#  in.7.layers: 1
+#  out.3-7: 0.5
+#  clip.4.attn: slider_b

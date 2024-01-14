@@ -55,7 +55,7 @@ def sub(a,b,taskinfo) -> torch.Tensor:
     return a - b
 
 
-#Bespoke caching and recursion logic to let the difference operation be cached independantly of the adding step
+#Bespoke caching and recursion logic to have the difference calculation cached independantly of the adding step
 #Allows the weight to be adjusted without having to redo the entire calculation.
 def traindiff(taskinfo) -> torch.Tensor:
     source_a,source_b,source_c = taskinfo.sources

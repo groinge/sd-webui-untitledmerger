@@ -6,7 +6,7 @@ import scripts.untitled.operators as oper
 import scripts.common as cmn
 import torch,os,re
 from tqdm import tqdm
-from copy import copy
+from copy import copy,deepcopy
 from modules import devices,shared,script_loading,paths,sd_hijack
 
 networks = script_loading.load_module(os.path.join(paths.extensions_builtin_dir,'Lora','networks.py'))
@@ -149,6 +149,7 @@ def parse_recipe(recipe,keys,primary) -> list:
     tasks = []
 
     assigned_keys = assign_keys_to_targets(list(recipe.keys()),keys)
+    recipe = apply_inheritance(recipe)
 
     for key in keys:
         if key in SKIP_KEYS or 'model_ema' in key:
@@ -275,3 +276,10 @@ class safe_open_multiple(object):
         for file in self.open_files.values():
             file.__exit__(*args)
 
+#Basic inheritence to targets that only have single numbers
+def apply_inheritance(recipe):
+    for target, params in recipe.items():
+        if not isinstance(params,dict):
+            recipe[target] = deepcopy(recipe['all'])
+            list(recipe[target].values())[0]['alpha'] = params
+    return recipe
