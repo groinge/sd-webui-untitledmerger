@@ -131,7 +131,7 @@ def prepare_merge(recipe,timer) -> dict:
         state_dict = {}
         #Reuse merged tensors from the last merge's loaded model, if availible
         if shared.sd_model.sd_checkpoint_info.name_for_extra == str(hash(cmn.last_merge_tasks)):
-            state_dict,tasks = get_tensors_from_model(state_dict,tasks)
+            state_dict,tasks = get_tensors_from_loaded_model(state_dict,tasks)
         
         timer.record('Prepare merge')
 
@@ -242,7 +242,7 @@ def assign_keys_to_targets(targets,keys) -> dict:
     return assigned_keys
 
 
-def get_tensors_from_model(state_dict,tasks) -> dict:
+def get_tensors_from_loaded_model(state_dict,tasks) -> dict:
         intersected = set(cmn.last_merge_tasks).intersection(set(tasks))
         if intersected:
             #clear loras from model
@@ -259,7 +259,7 @@ def get_tensors_from_model(state_dict,tasks) -> dict:
             
         return state_dict,tasks
 
-#Tensors are loaded lazily throughout the merge, both to save memory and reduce code complexity. Pickletensors are not supported due to their high overhead.
+#Tensors are loaded lazily throughout the merge, both to save memory and reduce code complexity.
 class safe_open_multiple(object):
     def __init__(self,checkpoints,device):
         self.checkpoints = checkpoints

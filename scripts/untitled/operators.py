@@ -74,7 +74,7 @@ def traindiff(taskinfo) -> torch.Tensor:
     b = source_b()
     c = source_c()
 
-    #From https://github.com/hako-mikan/sd-webui-supermerger
+    ###From https://github.com/hako-mikan/sd-webui-supermerger
     if torch.allclose(b.float(), c.float(), rtol=0, atol=0):
         return a
 
@@ -91,6 +91,7 @@ def traindiff(taskinfo) -> torch.Tensor:
 
     new_diff = scale * torch.abs(diff_AB)
     result = new_diff.to(cmn.precision)  *1.8
+    ####
 
     cmn.tensor_cache.append(new_taskinfo,result)
 

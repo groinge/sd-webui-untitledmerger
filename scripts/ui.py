@@ -1,5 +1,5 @@
 import gradio as gr
-import os,yaml,torch,time,re,gc
+import os,yaml,torch,re,gc
 from modules import sd_models,script_callbacks,scripts,shared,devices,sd_unet,sd_hijack,sd_models_config,timer,ui_components
 from modules.ui_common import create_refresh_button,create_output_panel,plaintext_to_html
 from scripts.untitled import merger
@@ -57,61 +57,68 @@ def on_ui_tabs():
                     emptycachebutton = gr.Button(value='Empty Cache')
                 
                 #### BLOCK SLIDERS
-                    
+                                    
+                def createslider(name):
+                    slider = gr.Slider(label=name,minimum=0,maximum=1,value=0.5,interactive=False,scale=5,min_width=120)
+
+                    def updateslidervalue(slider):
+                        cmn.slidervalues[name] = slider
+
+                    slider.release(fn=updateslidervalue,inputs=slider)
+                    cmn.slidervalues[name] = None
+                    return slider
+
+                def createblocksliders(side):
+                    created_sliders = {}
+                    for block_numb in range(0,12):
+                        name = side+str(block_numb)
+                        created_sliders[name] = createslider(name)
+                    return created_sliders
+                        
+                sliders = {}
+
                 with gr.Row():
-                    enable_all = gr.Button(value="enable all")
-                    disable_all = gr.Button(value="disble all")
+                    gr.Column(scale=4,min_width=0)
+                    sliders['clip'] = createslider('clip')
+                    gr.Column(scale=4,min_width=0)
                 with gr.Row():
-                    blocksliderclass =  "blockslider"
-                    checkboxeslist = []
+                    gr.Column(scale=1,min_width=0)
 
-                    def createsliders(side):
-                        global blocksliders
-                        sliders = {}
-                        checkboxes = []
+                    with gr.Column(scale=5):
+                        sliders.update(createblocksliders('in.'))
 
-                        for block_numb in range(0,12):
-                            name = side+str(block_numb)
-                            with gr.Row():
-                                chkbox = gr.Checkbox(label=' ',info=' ',scale=1,min_width=5)
-
-                                def toggleinteractive(chkbox):
-                                    cmn.slidervalues[name][0] = chkbox
-                                    return gr.update(interactive=chkbox)
-
-                                slider = gr.Slider(label=name,elem_classes=[blocksliderclass],minimum=0,maximum=1,value=0.5,interactive=False,scale=20)
-
-                                def updateslidervalue(slider):
-                                    cmn.slidervalues[name][1] = slider
-
-                                slider.release(fn=updateslidervalue,inputs=slider)
-                                chkbox.change(fn=toggleinteractive,inputs=chkbox,outputs=slider,queue=False)
-
-                                checkboxeslist.append(chkbox)
-
-                                cmn.slidervalues[name] = [False,0.5]
-                                sliders[name] = slider
-                                checkboxes.append(chkbox)
-                        return sliders
-                    
-
-                    with gr.Column(scale=2,min_width=0):pass
-
-                    with gr.Column(scale=4):
-                        createsliders('in.')
-
-                    with gr.Column(scale=1,min_width=0):pass
+                    gr.Column(scale=1,min_width=0)
    
-                    with gr.Column(scale=4):
-                        createsliders('out.')
+                    with gr.Column(scale=5):
+                        sliders.update(createblocksliders('out.'))
                             
-                    with gr.Column(scale=2,min_width=0):pass
+                    gr.Column(scale=1,min_width=0)
+                with gr.Row():
+                    gr.Column(scale=4,min_width=0)
+                    sliders['mid'] = createslider('mid')
+                    gr.Column(scale=4,min_width=0)
+                with gr.Row():
+                    slidertoggles = gr.CheckboxGroup(choices=list(sliders.keys()))
 
-                    def set_checkboxes(value):
-                        return [gr.update(value=value)]*len(checkboxeslist)
-                    
-                    enable_all.click(fn = lambda: set_checkboxes(True),outputs=checkboxeslist,queue=False)
-                    disable_all.click(fn = lambda: set_checkboxes(False),outputs=checkboxeslist,queue=False)
+                    def toggle_slider(inputs):
+                        enabled_sliders = inputs.pop(slidertoggles)
+                        updates = {}
+                        for component,value in inputs.items():
+                            if component.label in enabled_sliders:
+                                updates[component] = gr.update(interactive=True)
+                                cmn.slidervalues[component.label] = value
+                            else:
+                                updates[component] = gr.update(interactive=False)
+                                cmn.slidervalues[component.label] = None
+                        return updates
+
+                    slidertoggles.change(fn=toggle_slider,inputs={slidertoggles,*list(sliders.values())},outputs={*list(sliders.values())},show_progress='hidden')
+                with gr.Row():
+                    enable_all = gr.Button(value="Enable all")
+                    disable_all = gr.Button(value="Disable all")
+
+                    enable_all.click(fn=lambda x: gr.update(value = list(sliders.keys())),outputs=slidertoggles)
+                    disable_all.click(fn=lambda: gr.update(value = []),outputs=slidertoggles)
 
             with gr.Column():
                 result_gallery, html_info_x, html_info, html_log = create_output_panel("txt2img", shared.opts.outdir_txt2img_samples)    
@@ -126,9 +133,8 @@ script_callbacks.on_ui_tabs(on_ui_tabs)
 def basic_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c):
     blockweights = {}
 
-    for name,values in cmn.slidervalues.items():
-        enabled,value = values
-        if enabled:
+    for name,value in cmn.slidervalues.items():
+        if value is not None:
             blockweights[name] = value
 
     recipe = {}
@@ -270,3 +276,39 @@ def load_merged_state_dict(state_dict,checkpoint_info):
     else:
         sd_models.model_data.__init__()
         sd_models.load_model(checkpoint_info=checkpoint_info, already_loaded_state_dict=state_dict)
+
+"""def guess_model_config_from_state_dict(sd, filename):
+
+    sd2_cond_proj_weight = sd.get('cond_stage_model.model.transformer.resblocks.0.attn.in_proj_weight', None)
+    diffusion_model_input = sd.get('model.diffusion_model.input_blocks.0.0.weight', None)
+    sd2_variations_weight = sd.get('embedder.model.ln_final.weight', None)
+
+
+
+    if sd.get('conditioner.embedders.1.model.ln_final.weight', None) is not None:
+        return "SDXL"
+    if sd.get('conditioner.embedders.0.model.ln_final.weight', None) is not None:
+        return 'SDXL_refiner'
+    elif sd.get('depth_model.model.pretrained.act_postprocess3.0.project.0.bias', None) is not None:
+        return config_depth_model
+    elif sd2_variations_weight is not None and sd2_variations_weight.shape[0] == 768:
+        return config_unclip
+    elif sd2_variations_weight is not None and sd2_variations_weight.shape[0] == 1024:
+        return config_unopenclip
+
+    if sd2_cond_proj_weight is not None and sd2_cond_proj_weight.shape[1] == 1024:
+        if diffusion_model_input.shape[1] == 9:
+            return config_sd2_inpainting
+        else:
+            return config_sd2
+
+    if diffusion_model_input is not None:
+        if diffusion_model_input.shape[1] == 9:
+            return config_inpainting
+        if diffusion_model_input.shape[1] == 8:
+            return config_instruct_pix2pix
+
+
+    return config_default
+
+"""
