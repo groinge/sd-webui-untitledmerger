@@ -1,6 +1,7 @@
 import gradio as gr
-import os,yaml,torch,re,gc
-from modules import sd_models,script_callbacks,scripts,shared,devices,sd_unet,sd_hijack,sd_models_config,timer,ui_components,paths_internal
+import os,yaml,torch,re
+from modules import sd_models,script_callbacks,scripts,shared,devices,sd_unet,sd_hijack,sd_models_config,ui_components,paths_internal,ui_loadsave
+from modules.timer import Timer
 from modules.ui_common import create_refresh_button,create_output_panel,plaintext_to_html
 from scripts.untitled import merger,misc_util
 import scripts.common as cmn
@@ -49,7 +50,6 @@ CALCMODE_PRESETS = {
         checkpoint_a: model_a
         checkpoint_b: model_b
         checkpoint_c: model_c"""
-#additional models can be inclu
 }
 
 def on_ui_tabs():
@@ -86,11 +86,14 @@ def on_ui_tabs():
 
                 status = gr.Textbox(max_lines=1,label="",info="",interactive=False)
 
+                with gr.Row():
+                    autosave_checkbox = gr.Checkbox(label='Autosave on merge')
+
                 #### MERGE BUTTONS
                 with gr.Row():
-                    mergebutton = gr.Button(value='Merge',variant='primary')
-                    emptycachebutton = gr.Button(value='Empty Cache')
-                
+                    merge_button = gr.Button(value='Merge',variant='primary')
+                    empty_cache_button = gr.Button(value='Empty Cache')
+
                 #### BLOCK SLIDERS
                                     
                 def createslider(name):
@@ -165,15 +168,17 @@ def on_ui_tabs():
             with gr.Column():
                 result_gallery, html_info_x, html_info, html_log = create_output_panel("txt2img", shared.opts.outdir_txt2img_samples)    
 
-            emptycachebutton.click(fn=clear_cache)
-            mergebutton.click(fn=start_merge, inputs=[mode_selector,model_a,model_b,model_c,alpha,beta,gamma,recipe_editor],outputs=status)
+            empty_cache_button.click(fn=merger.clear_cache)
+            merge_button.click(fn=start_merge, inputs=[mode_selector,model_a,model_b,model_c,alpha,beta,gamma,recipe_editor,autosave_checkbox],outputs=status)
+
+
     return [(ui, "Untitled merger", "untitled_merger")]
 
 script_callbacks.on_ui_tabs(on_ui_tabs)
 
 
-def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,editor):
-    mTimer = timer.Timer()
+def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,editor,autosave):
+    timer = Timer()
 
     model_variables = {'model_a':model_a.split(' ')[0],'model_b':model_b.split(' ')[0],'model_c':model_c.split(' ')[0]}
 
@@ -218,28 +223,26 @@ def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,edit
     devices.torch_gc()
 
     #Merge starts here:
-    state_dict = merger.prepare_merge(recipe,mTimer)
+    state_dict = merger.prepare_merge(recipe,timer)
+
+    merge_name = create_name(checkpoints,calcmode,slider_a)
 
     checkpoint_info = deepcopy(sd_models.get_closet_checkpoint_match(os.path.basename(recipe['primary_checkpoint'])))
-    checkpoint_info.name_for_extra = str(hash(cmn.last_merge_tasks))
+    checkpoint_info.short_title = str(hash(cmn.last_merge_tasks))
+    
+    checkpoint_info.name_for_extra = '_TEMP_MERGE_'+merge_name
 
-    #save_file(state_dict,os.path.join(paths_internal.models_path,'Stable-diffusion','crap.safetensors'))
+    if autosave:
+        save_state_dict(state_dict,merge_name,timer)
     
     load_merged_state_dict(state_dict,checkpoint_info)
-    mTimer.record('Load model')
+    timer.record('Load model')
     del state_dict
     devices.torch_gc()
 
-    message = 'Merge completed in ' + mTimer.summary()
+    message = 'Merge completed in ' + timer.summary()
     print(message)
     return message
-
-
-def clear_cache():
-    cmn.tensor_cache.__init__(cmn.cache_size)
-    gc.collect()
-    devices.torch_gc()
-    torch.cuda.empty_cache()
 
 
 def load_merged_state_dict(state_dict,checkpoint_info):
@@ -248,7 +251,7 @@ def load_merged_state_dict(state_dict,checkpoint_info):
     if shared.sd_model.used_config == config:
         print('Loading weights using already loaded model...')
 
-        sd_models.load_model_weights(shared.sd_model, checkpoint_info, state_dict, timer.Timer())
+        sd_models.load_model_weights(shared.sd_model, checkpoint_info, state_dict, Timer())
         
         sd_hijack.model_hijack.hijack(shared.sd_model)
 
@@ -272,3 +275,33 @@ def test_regex(input,model_a):
     selected_keys = re.findall(regex,'\n'.join(keys),re.M)
     joined = '\n'.join(selected_keys)
     return  f'Matched keys: {len(selected_keys)}\n{joined}'
+
+
+def create_name(checkpoints,calcmode,alpha):
+    names = []
+    try:
+        checkpoints = checkpoints[0:3]
+    except:pass
+    for filename in checkpoints:
+        name = os.path.basename(os.path.splitext(filename)[0]).lower()
+        segments = re.findall(r'^\w{0,10}|[ev]\d+|\d+(?=.*\.)|xl',name)
+        abridgedname = segments.pop(0).title()
+        for segment in set(segments):
+            abridgedname += segment.upper()
+        names.append(abridgedname)
+    new_name = f'{"~".join(names)}_{calcmode.replace(" ","-").upper()}x{alpha}'
+    return new_name
+        
+
+def save_state_dict(state_dict,name,timer=None):
+    filename = os.path.join(paths_internal.models_path,'Stable-diffusion',name+'.safetensors')
+    try:
+        save_file(state_dict,filename)
+    except:
+        gr.Warning('Error when saving checkpoint, check console')
+        raise
+
+    try:
+        timer.record('Save checkpoint')
+    except: pass
+    gr.Info('Model saved as '+filename)

@@ -5,10 +5,10 @@ from collections import OrderedDict
 import scripts.untitled.operators as oper
 import scripts.untitled.misc_util as mutil
 import scripts.common as cmn
-import torch,os,re
+import torch,os,re,gc
 from tqdm import tqdm
 from copy import copy,deepcopy
-from modules import devices,shared,script_loading,paths,sd_hijack
+from modules import devices,shared,script_loading,paths
 
 networks = script_loading.load_module(os.path.join(paths.extensions_builtin_dir,'Lora','networks.py'))
 
@@ -131,13 +131,16 @@ def prepare_merge(recipe,timer) -> dict:
 
         state_dict = {}
         #Reuse merged tensors from the last merge's loaded model, if availible
-        if shared.sd_model.sd_checkpoint_info.name_for_extra == str(hash(cmn.last_merge_tasks)):
+        if shared.sd_model.sd_checkpoint_info.short_title == str(hash(cmn.last_merge_tasks)):
             state_dict,tasks = get_tensors_from_loaded_model(state_dict,tasks)
         
         timer.record('Prepare merge')
-
-        with ThreadPoolExecutor(max_workers=cmn.threads) as executor:
-            results = executor.map(initialize_merge,tasks)
+        try:
+            with ThreadPoolExecutor(max_workers=cmn.threads) as executor:
+                results = executor.map(initialize_merge,tasks)
+        except:
+            clear_cache()
+            raise
     
     cmn.last_merge_tasks = tuple(tasks_copy)
     state_dict.update(dict(results))
@@ -251,10 +254,18 @@ class safe_open_multiple(object):
         for file in self.open_files.values():
             file.__exit__(*args)
 
-#Basic inheritence to targets that only have single numbers
+
+#Basic inheritence from all to targets that only input a single number
 def apply_inheritance(recipe):
     for target, params in recipe.items():
         if not isinstance(params,dict):
             recipe[target] = deepcopy(recipe['all'])
             list(recipe[target].values())[0]['alpha'] = params
     return recipe
+
+
+def clear_cache():
+    cmn.tensor_cache.__init__(cmn.cache_size)
+    gc.collect()
+    devices.torch_gc()
+    torch.cuda.empty_cache()
