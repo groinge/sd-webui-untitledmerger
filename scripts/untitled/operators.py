@@ -137,5 +137,5 @@ def smoothen(a,taskinfo):
     filtered_diff = scipy.ndimage.median_filter(a.detach().cpu().to(torch.float32).numpy(), size=3)
     # Apply Gaussian filter to the filtered differences
     filtered_diff = scipy.ndimage.gaussian_filter(filtered_diff, sigma=1)
-    return torch.tensor(filtered_diff,cmn.precision,cmn.device)    
+    return torch.tensor(filtered_diff,dtype=cmn.precision,device=cmn.device)    
     

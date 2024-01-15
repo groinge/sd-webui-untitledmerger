@@ -65,11 +65,11 @@ CALCMODE_PRESETS = {
 
 'Add disimilarity':"""  'all':
     add:
-      alpha: slider_b
+      alpha: slider_a
       sources:
         checkpoint_a: model_a
         similarity:
-          alpha: slider_a
+          alpha: slider_b
           beta: 1
           gamma: slider_c
           sources:
