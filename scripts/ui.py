@@ -10,7 +10,10 @@ from copy import deepcopy
 
 checkpoints_no_pickles = lambda: [checkpoint for checkpoint in sd_models.checkpoint_tiles() if checkpoint.split(' ')[0].endswith('.safetensors')]
 
-ext2abs = lambda *x: os.path.join(scripts.basedir(),*x)
+
+extension_path = scripts.basedir()
+
+ext2abs = lambda *x: os.path.join(extension_path,*x)
 
 with open(ext2abs('scripts','examplemerge.yaml'), 'r') as file:
     EXAMPLE = file.read()
@@ -19,6 +22,15 @@ CALCMODE_PRESETS = {
 'Weight-Sum':"""  'all':
     weight-sum:
       alpha: slider_a
+      sources:
+        checkpoint_a: model_a
+        checkpoint_b: model_b""",
+
+'Combined similarity':"""  'all':
+    similarity:
+      alpha: slider_a
+      beta: 0
+      gamma: slider_c
       sources:
         checkpoint_a: model_a
         checkpoint_b: model_b""",
@@ -41,7 +53,7 @@ CALCMODE_PRESETS = {
         checkpoint_b: model_b
         checkpoint_c: model_c""",
 
-'Extract':"""  'all':
+'Extract (dis)similarity':"""  'all':
     extract:
       alpha: slider_a
       beta: slider_b
@@ -49,11 +61,24 @@ CALCMODE_PRESETS = {
       sources:
         checkpoint_a: model_a
         checkpoint_b: model_b
-        checkpoint_c: model_c"""
+        checkpoint_c: model_c""",
+
+'Add disimilarity':"""  'all':
+    add:
+      alpha: slider_b
+      sources:
+        checkpoint_a: model_a
+        similarity:
+          alpha: slider_a
+          beta: 1
+          gamma: slider_c
+          sources:
+            checkpoint_b: model_b
+            checkpoint_c: model_c"""
 }
 
 def on_ui_tabs():
-    with gr.Blocks() as ui:
+    with gr.Blocks() as cmn.ui:
         with ui_components.ResizeHandleRow():
             with gr.Column():
 
@@ -75,14 +100,15 @@ def on_ui_tabs():
                     swap_models_AB.click(fn=swapvalues,inputs=[model_a,model_b],outputs=[model_a,model_b])
                     swap_models_BC.click(fn=swapvalues,inputs=[model_b,model_c],outputs=[model_b,model_c])
 
+
                 #### MODE SELECTION
-                mode_selector = gr.Radio(label='Merge mode',choices=list(CALCMODE_PRESETS.keys()),value=list(CALCMODE_PRESETS.keys())[0])
+                mode_selector = gr.Radio(label='Merge mode:',choices=list(CALCMODE_PRESETS.keys()),value=list(CALCMODE_PRESETS.keys())[0])
 
                 ##### MAIN SLIDERS
                 with gr.Row():
-                    alpha = gr.Slider(minimum=-1,maximum=2,label="slider_a (alpha)",value=0.5)
-                    beta = gr.Slider(minimum=-1,maximum=2,label="slider_b (beta)",value=0.5)
-                    gamma = gr.Slider(minimum=0,maximum=100,label="slider_c (gamma)",value=5)
+                    alpha = gr.Slider(minimum=-1,step=0.01,maximum=2,label="slider_a (alpha)",value=0.5)
+                    beta = gr.Slider(minimum=-1,step=0.01,maximum=2,label="slider_b (beta)",value=0.5)
+                    gamma = gr.Slider(minimum=0,step=0.01,maximum=2,label="slider_c (gamma)",value=0.25)
 
                 status = gr.Textbox(max_lines=1,label="",info="",interactive=False)
 
@@ -171,8 +197,9 @@ def on_ui_tabs():
             empty_cache_button.click(fn=merger.clear_cache)
             merge_button.click(fn=start_merge, inputs=[mode_selector,model_a,model_b,model_c,alpha,beta,gamma,recipe_editor,autosave_checkbox],outputs=status)
 
+        
 
-    return [(ui, "Untitled merger", "untitled_merger")]
+    return [(cmn.ui, "Untitled merger", "untitled_merger")]
 
 script_callbacks.on_ui_tabs(on_ui_tabs)
 
@@ -217,12 +244,13 @@ def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,edit
     recipe['checkpoints'] = checkpoints
     recipe['primary_checkpoint'] = checkpoints[0]
 
+
     sd_models.unload_model_weights(shared.sd_model)
     sd_unet.apply_unet("None")
     sd_hijack.model_hijack.undo_hijack(shared.sd_model)
     devices.torch_gc()
 
-    #Merge starts here:
+    #Actual main merge process begins here:
     state_dict = merger.prepare_merge(recipe,timer)
 
     merge_name = create_name(checkpoints,calcmode,slider_a)
@@ -284,10 +312,10 @@ def create_name(checkpoints,calcmode,alpha):
     except:pass
     for filename in checkpoints:
         name = os.path.basename(os.path.splitext(filename)[0]).lower()
-        segments = re.findall(r'^\w{0,10}|[ev]\d+|\d+(?=.*\.)|xl',name)
+        segments = re.findall(r'^\w{0,10}|[ev]\d{1,3}|(?<=\D)\d{1,3}(?=.*\.)|xl',name)
         abridgedname = segments.pop(0).title()
         for segment in set(segments):
-            abridgedname += segment.upper()
+            abridgedname += "-"+segment.upper()
         names.append(abridgedname)
     new_name = f'{"~".join(names)}_{calcmode.replace(" ","-").upper()}x{alpha}'
     return new_name

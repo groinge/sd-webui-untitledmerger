@@ -30,9 +30,11 @@ SKIP_KEYS = [
 #Operator names can only have letters and "- in them
 OPERATORS = {'add': oper.add,
              'sub': oper.sub,
+             'smoothen': oper.smoothen,
              'weight-sum': oper.weight_sum,
              'traindiff': oper.traindiff,
-             'extract': oper.extract_super
+             'extract': oper.extract,
+             'similarity': oper.similarity
              }
 
 #Hashable merge info that is used as keys for the cache
@@ -220,7 +222,6 @@ def assign_keys_to_targets(targets,keys) -> dict:
     return assigned_keys
 
 
-
 def get_tensors_from_loaded_model(state_dict,tasks) -> dict:
         intersected = set(cmn.last_merge_tasks).intersection(set(tasks))
         if intersected:
@@ -238,7 +239,7 @@ def get_tensors_from_loaded_model(state_dict,tasks) -> dict:
             
         return state_dict,tasks
 
-#Tensors are loaded lazily throughout the merge, both to save memory and reduce code complexity.
+
 class safe_open_multiple(object):
     def __init__(self,checkpoints,device):
         self.checkpoints = checkpoints

@@ -1,6 +1,7 @@
-import torch
+import torch,scipy
 import scripts.common as cmn
 from copy import deepcopy
+
 
 ###DECORATORS####
 
@@ -32,7 +33,7 @@ def cache_operation(func):
 def load_tensor(taskinfo) -> torch.Tensor:
     key = taskinfo.key
     fname = taskinfo['filename']
-    return cmn.loaded_checkpoints[fname].get_tensor(key)
+    return cmn.loaded_checkpoints[fname].get_tensor(key).to(cmn.device)
 
 
 @recursion
@@ -99,8 +100,17 @@ def traindiff(taskinfo) -> torch.Tensor:
 
 
 #From https://github.com/hako-mikan/sd-webui-supermerger
+
 @recursion
-def extract_super(base: torch.Tensor,a: torch.Tensor, b: torch.Tensor, taskinfo) -> torch.Tensor:
+def extract(base, a, b, taskinfo):
+    return extract_super(base,a,b,taskinfo)
+
+@cache_operation
+@recursion
+def similarity(a: torch.Tensor, b: torch.Tensor, taskinfo):
+    return extract_super(None,a,b,taskinfo)
+
+def extract_super(base: torch.Tensor|None,a: torch.Tensor, b: torch.Tensor, taskinfo) -> torch.Tensor:
     alpha = taskinfo['alpha']
     beta = taskinfo['beta']
     gamma = taskinfo['gamma']
@@ -114,6 +124,18 @@ def extract_super(base: torch.Tensor,a: torch.Tensor, b: torch.Tensor, taskinfo)
     a = a.float() - base
     b = b.float() - base
     c = torch.cosine_similarity(a, b, -1).clamp(-1, 1).unsqueeze(-1)
-    d = ((c + 1) / 2) ** gamma
+    d = ((c + 1) / 2) ** (gamma * 25)
     result = base + torch.lerp(a, b, alpha) * torch.lerp(d, 1 - d, beta)
     return result.to(dtype)
+
+
+#From https://github.com/hako-mikan/sd-webui-supermerger
+@cache_operation
+@recursion
+def smoothen(a,taskinfo):
+    # Apply median filter to the differences
+    filtered_diff = scipy.ndimage.median_filter(a.detach().cpu().to(torch.float32).numpy(), size=3)
+    # Apply Gaussian filter to the filtered differences
+    filtered_diff = scipy.ndimage.gaussian_filter(filtered_diff, sigma=1)
+    return torch.tensor(filtered_diff,cmn.precision,cmn.device)    
+    
