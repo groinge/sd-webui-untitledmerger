@@ -3,6 +3,7 @@ from safetensors import SafetensorError
 from concurrent.futures import ThreadPoolExecutor
 from collections import OrderedDict
 import scripts.untitled.operators as oper
+import scripts.untitled.misc_util as mutil
 import scripts.common as cmn
 import torch,os,re
 from tqdm import tqdm
@@ -173,14 +174,6 @@ def initialize_merge(taskinfo) -> tuple:
     #torch.cuda.empty_cache()
     return (taskinfo.key, tensor)
 
-BASE_SELECTORS = {
-    "all":  "",
-    "clip": "cond",
-    "unet": "model\\.diffusion_model",
-    "in":   "model\\.diffusion_model\\.input_blocks",
-    "out":  "model\\.diffusion_model\\.output_blocks",
-    "mid":  "model\\.diffusion_model\\.middle_block"
-}
 
 BASE_SELECTORS_PRIORITY = {
     "all":  0,
@@ -197,33 +190,14 @@ def assign_keys_to_targets(targets,keys) -> dict:
     for target_name in targets:
         target = re.split("\.|:",target_name.lower())
 
-        regex = "^"
         priority = 0
-        if target[0] in BASE_SELECTORS:
-            priority += BASE_SELECTORS_PRIORITY[target[0]]
-            regex += BASE_SELECTORS[target.pop(0)]
-
+        if target[0] in mutil.BASE_SELECTORS:
+            priority += BASE_SELECTORS_PRIORITY[target.pop(0)]
+            
         priority += len(target)
 
-        for selector in target:
-            #Check if the selector qualifies as a number
-            if re.search(r'^[\d,-]*$',selector):
-                
-                #Turns number inputs like "2-5,10" in to "2|3|4|5|10"
-                splitnumeric = set(selector.split(','))
-                for segment in splitnumeric.copy():
-                    if '-' in segment:
-                        a, b = segment.split('-')
-                        valuerange = [str(i) for i in range(int(a),int(b)+1)]
-                        splitnumeric.remove(segment)
-                        splitnumeric.update(valuerange)
-                formattedselector = '|'.join(splitnumeric)
+        regex = mutil.target_to_regex(target_name)
 
-                regex += f"\\D*\\.(?:{formattedselector})\\."
-            else:
-                regex += f".*{selector}"
-
-        regex += ".*$"
         target_assigners.append((priority,target_name,regex))
     
     #Sorts the selectors according to the priority of the base selector + the number of segments in the target. 
@@ -241,6 +215,7 @@ def assign_keys_to_targets(targets,keys) -> dict:
 
         assigned_keys.update(target_dict)
     return assigned_keys
+
 
 
 def get_tensors_from_loaded_model(state_dict,tasks) -> dict:

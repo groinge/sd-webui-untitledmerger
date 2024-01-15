@@ -2,9 +2,9 @@ import gradio as gr
 import os,yaml,torch,re,gc
 from modules import sd_models,script_callbacks,scripts,shared,devices,sd_unet,sd_hijack,sd_models_config,timer,ui_components,paths_internal
 from modules.ui_common import create_refresh_button,create_output_panel,plaintext_to_html
-from scripts.untitled import merger
+from scripts.untitled import merger,misc_util
 import scripts.common as cmn
-from safetensors.torch import save_file
+from safetensors.torch import save_file, safe_open
 from copy import deepcopy
 
 checkpoints_no_pickles = lambda: [checkpoint for checkpoint in sd_models.checkpoint_tiles() if checkpoint.split(' ')[0].endswith('.safetensors')]
@@ -80,12 +80,11 @@ def on_ui_tabs():
 
                 ##### MAIN SLIDERS
                 with gr.Row():
-                    alpha = gr.Slider(minimum=-1,maximum=2,label="alpha",value=0.5)
-                    beta = gr.Slider(minimum=-1,maximum=2,label="beta",value=0.5)
-                    gamma = gr.Slider(minimum=0,maximum=100,label="gamma",value=5)
+                    alpha = gr.Slider(minimum=-1,maximum=2,label="slider_a (alpha)",value=0.5)
+                    beta = gr.Slider(minimum=-1,maximum=2,label="slider_b (beta)",value=0.5)
+                    gamma = gr.Slider(minimum=0,maximum=100,label="slider_c (gamma)",value=5)
 
                 status = gr.Textbox(max_lines=1,label="",info="",interactive=False)
-                """recipe = gr.Code(value=EXAMPLE,lines=30,language='yaml',label='Recipe')"""
 
                 #### MERGE BUTTONS
                 with gr.Row():
@@ -156,9 +155,12 @@ def on_ui_tabs():
 
                         enable_all.click(fn=lambda x: gr.update(value = list(sliders.keys())),outputs=slidertoggles)
                         disable_all.click(fn=lambda: gr.update(value = []),outputs=slidertoggles)
-                with gr.Accordion(label='Recipe editor'):
+                with gr.Accordion(label='Recipe editor',open=True):
                     recipe_editor = gr.Code(value=EXAMPLE,lines=20,language='yaml',label='yaml')
-
+                    with gr.Accordion(label='Test target selector',open=False):
+                        target_tester = gr.Textbox(max_lines=1,label="",info="",interactive=True,placeholder='out.4.tran.norm.weight')
+                        target_tester_display = gr.Textbox(max_lines=40,lines=40,label="Targeted keys:",info="",interactive=False)
+                        target_tester.change(fn=test_regex,inputs=[target_tester,model_a],outputs=target_tester_display,show_progress='minimal')
 
             with gr.Column():
                 result_gallery, html_info_x, html_info, html_log = create_output_panel("txt2img", shared.opts.outdir_txt2img_samples)    
@@ -191,6 +193,7 @@ def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,edit
 
     additional_models = recipe.get('checkpoints') or {}
     checkpoints = []
+
     for alias,name in {**model_variables, **additional_models}.items():
         checkpoint_info = sd_models.get_closet_checkpoint_match(name)
 
@@ -257,3 +260,15 @@ def load_merged_state_dict(state_dict,checkpoint_info):
         sd_models.model_data.__init__()
         sd_models.load_model(checkpoint_info=checkpoint_info, already_loaded_state_dict=state_dict)
 
+
+def test_regex(input,model_a):
+    regex = misc_util.target_to_regex(input)
+
+    path = sd_models.get_closet_checkpoint_match(model_a).filename
+
+    with safe_open(path,framework='pt',device='cpu') as file:
+        keys = file.keys()
+
+    selected_keys = re.findall(regex,'\n'.join(keys),re.M)
+    joined = '\n'.join(selected_keys)
+    return  f'Matched keys: {len(selected_keys)}\n{joined}'
