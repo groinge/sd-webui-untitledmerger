@@ -133,18 +133,19 @@ def prepare_merge(recipe,timer) -> dict:
 
         state_dict = {}
         #Reuse merged tensors from the last merge's loaded model, if availible
-        if shared.sd_model.sd_checkpoint_info.short_title == str(hash(cmn.last_merge_tasks)):
+        if shared.sd_model.sd_checkpoint_info.short_title == cmn.last_merge_tasks_hash:
             state_dict,tasks = get_tensors_from_loaded_model(state_dict,tasks)
         
         timer.record('Prepare merge')
         try:
             with ThreadPoolExecutor(max_workers=cmn.threads) as executor:
                 results = executor.map(initialize_merge,tasks)
+                executor.shutdown()
         except:
             clear_cache()
             raise
     
-    cmn.last_merge_tasks = tuple(tasks_copy)
+    cmn.last_merge_tasks_hash = str(hash(tuple(tasks_copy)))
     state_dict.update(dict(results))
     
     timer.record('Merge')
@@ -170,7 +171,7 @@ def parse_recipe(recipe,keys,primary) -> list:
 def initialize_merge(taskinfo) -> tuple:
     try:
         tensor = taskinfo.start_task()
-    except SafetensorError:
+    except SafetensorError: #Fallback in case one of the secondary models lack a key present in the primary model
         tensor = cmn.loaded_checkpoints[cmn.primary].get_tensor(taskinfo.key)
 
     if cmn.low_vram:
@@ -223,7 +224,7 @@ def assign_keys_to_targets(targets,keys) -> dict:
 
 
 def get_tensors_from_loaded_model(state_dict,tasks) -> dict:
-        intersected = set(cmn.last_merge_tasks).intersection(set(tasks))
+        intersected = set(cmn.last_merge_tasks_hash).intersection(set(tasks))
         if intersected:
             #clear loras from model
             with torch.no_grad():
