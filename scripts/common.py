@@ -1,7 +1,7 @@
 from torch import float16
 from modules import devices
 
-threads = 12
+threads = 8
 
 device = devices.get_optimal_device_name()
 precision = float16

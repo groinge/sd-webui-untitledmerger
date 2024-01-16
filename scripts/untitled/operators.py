@@ -9,7 +9,8 @@ def recursion(func):
     def inner(taskinfo):
         source_tensors = []
         for source_taskinfo in taskinfo.sources:
-            source_tensors.append(source_taskinfo())
+            source_tensor = source_taskinfo.start_task()
+            source_tensors.append(source_tensor)
 
         return func(*source_tensors,taskinfo)
     return inner
@@ -60,7 +61,7 @@ def sub(a,b,taskinfo) -> torch.Tensor:
 #Allows the weight to be adjusted without having to redo the entire calculation.
 def traindiff(taskinfo) -> torch.Tensor:
     source_a,source_b,source_c = taskinfo.sources
-    a = source_a()
+    a = source_a.start_task()
 
     new_taskinfo = deepcopy(taskinfo)
     new_taskinfo.args_values = tuple()
@@ -72,8 +73,8 @@ def traindiff(taskinfo) -> torch.Tensor:
     except KeyError:
         pass
 
-    b = source_b()
-    c = source_c()
+    b = source_b.start_task()
+    c = source_c.start_task()
 
     ###From https://github.com/hako-mikan/sd-webui-supermerger
     if torch.allclose(b.float(), c.float(), rtol=0, atol=0):
@@ -125,6 +126,7 @@ def extract_super(base: torch.Tensor|None,a: torch.Tensor, b: torch.Tensor, task
     return result.to(dtype)
 
 extract = recursion(extract_super)
+
 
 #From https://github.com/hako-mikan/sd-webui-supermerger
 @cache_operation

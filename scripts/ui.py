@@ -74,7 +74,34 @@ CALCMODE_PRESETS = {
           gamma: slider_c
           sources:
             checkpoint_b: model_b
-            checkpoint_c: model_c"""
+            checkpoint_c: model_c""",
+
+'Smooth Add Difference':"""  'all':
+    add:
+      alpha: slider_a
+      sources:
+        checkpoint_a: model_a
+        smooth:
+          sources:
+            sub:
+              sources:
+                checkpoint_b: model_b
+                checkpoint_c: model_c""",
+
+'Smooth Add disimilarity':"""  'all':
+    add:
+      alpha: slider_b
+      sources:
+        checkpoint_a: model_a
+        smooth:
+          sources:
+            similarity:
+              alpha: slider_a
+              beta: 1
+              gamma: slider_c
+              sources:
+                checkpoint_b: model_b
+                checkpoint_c: model_c"""
 }
 
 def on_ui_tabs():
@@ -103,6 +130,13 @@ def on_ui_tabs():
 
                 #### MODE SELECTION
                 mode_selector = gr.Radio(label='Merge mode:',choices=list(CALCMODE_PRESETS.keys()),value=list(CALCMODE_PRESETS.keys())[0])
+                with gr.Row():
+                    device_selector = gr.Radio(label='Preferred device/dtype for merging:',info='float16 is probably useless',choices=['cuda/float16', 'cuda/float32', 'cpu/float32'],value = 'cuda/float32' )
+                    worker_count = gr.Slider(step=2,minimum=2,value=cmn.threads,maximum=16,label='Worker thread count:',info=('Relevant for both cuda and CPU merging. Using too many threads can harm performance.'))
+                    def worker_count_fn(x): cmn.threads = int(x)
+                worker_count.release(fn=worker_count_fn,inputs=worker_count)
+                device_selector.change(fn=change_preferred_device,inputs=device_selector)
+                
 
                 ##### MAIN SLIDERS
                 with gr.Row():
@@ -334,3 +368,10 @@ def save_state_dict(state_dict,name,timer=None):
         timer.record('Save checkpoint')
     except: pass
     gr.Info('Model saved as '+filename)
+
+
+def change_preferred_device(input):
+    cmn.device,dtype = input.split('/')
+                     
+    if dtype == 'float16': cmn.precision=torch.float16
+    else: cmn.precision = torch.float32

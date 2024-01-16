@@ -54,9 +54,9 @@ class TaskInfo:
         return self.hash
 
     def __eq__(self, other):
-        return self.key == other.key and self.task == other.task and self.args_keys == other.args_keys and self.args_values == other.args_values and self.sources == other.sources
+        return (self.key, self.task, self.args_keys, self.args_values, self.sources) == (other.key, other.task, other.args_keys, other.args_values, other.sources)
     
-    def __call__(self):
+    def start_task(self):
         return self.task(self)
     
     def __getitem__(self,key):
@@ -169,7 +169,7 @@ def parse_recipe(recipe,keys,primary) -> list:
 
 def initialize_merge(taskinfo) -> tuple:
     try:
-        tensor = taskinfo()
+        tensor = taskinfo.start_task()
     except SafetensorError:
         tensor = cmn.loaded_checkpoints[cmn.primary].get_tensor(taskinfo.key)
 
