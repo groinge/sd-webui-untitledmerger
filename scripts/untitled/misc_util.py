@@ -34,7 +34,8 @@ def target_to_regex(target_name: str) -> str:
             formattedselector = '|'.join(splitnumeric)
 
             regex += f"\\D*\\.(?:{formattedselector})\\."
-        elif re.search(r'^\w*$',selector):
-            regex += f".*{selector}"
+        else:
+            regex += f".*{re.escape(selector)}"
     regex += ".*$"
     return regex
+

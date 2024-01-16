@@ -101,10 +101,6 @@ def traindiff(taskinfo) -> torch.Tensor:
 
 #From https://github.com/hako-mikan/sd-webui-supermerger
 
-@recursion
-def extract(base, a, b, taskinfo):
-    return extract_super(base,a,b,taskinfo)
-
 @cache_operation
 @recursion
 def similarity(a: torch.Tensor, b: torch.Tensor, taskinfo):
@@ -128,11 +124,12 @@ def extract_super(base: torch.Tensor|None,a: torch.Tensor, b: torch.Tensor, task
     result = base + torch.lerp(a, b, alpha) * torch.lerp(d, 1 - d, beta)
     return result.to(dtype)
 
+extract = recursion(extract_super)
 
 #From https://github.com/hako-mikan/sd-webui-supermerger
 @cache_operation
 @recursion
-def smoothen(a,taskinfo):
+def smooth(a,taskinfo):
     # Apply median filter to the differences
     filtered_diff = scipy.ndimage.median_filter(a.detach().cpu().to(torch.float32).numpy(), size=3)
     # Apply Gaussian filter to the filtered differences

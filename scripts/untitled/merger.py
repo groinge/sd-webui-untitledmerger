@@ -30,7 +30,7 @@ SKIP_KEYS = [
 #Operator names can only have letters and "- in them
 OPERATORS = {'add': oper.add,
              'sub': oper.sub,
-             'smoothen': oper.smoothen,
+             'smooth': oper.smooth,
              'weight-sum': oper.weight_sum,
              'traindiff': oper.traindiff,
              'extract': oper.extract,

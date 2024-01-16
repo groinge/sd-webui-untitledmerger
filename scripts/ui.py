@@ -65,11 +65,11 @@ CALCMODE_PRESETS = {
 
 'Add disimilarity':"""  'all':
     add:
-      alpha: slider_a
+      alpha: slider_b
       sources:
         checkpoint_a: model_a
         similarity:
-          alpha: slider_b
+          alpha: slider_a
           beta: 1
           gamma: slider_c
           sources:
@@ -212,7 +212,8 @@ def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,edit
     if editor == '':
         editor = 'targets:\n'
 
-    recipe_str = re.sub(r'(?<=targets:\n)',CALCMODE_PRESETS[calcmode]+'\n',editor)
+    if not re.search(r'''^  all|^  'all'|^  "all"''',editor,flags=re.I|re.M):
+        recipe_str = re.sub(r'(?<=targets:\n)',CALCMODE_PRESETS[calcmode]+'\n',editor)
 
     for model in model_variables.copy().keys():
         if not model_variables[model] or not re.search(f"^[^#\\n]*:\\s*{model}\\b$",recipe_str,re.M):
@@ -233,7 +234,7 @@ def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,edit
         assert checkpoint_info.filename.endswith('.safetensors'), 'This extension only supports safetensors checkpoints: '+name
         
         checkpoints.append(checkpoint_info.filename)
-        recipe_str = re.sub(f"\\b{alias}\\b",name,recipe_str,flags=re.I|re.M)
+        recipe_str = re.sub(f"\\b{re.escape(alias)}\\b",name,recipe_str,flags=re.I|re.M)
 
     recipe = yaml.safe_load(recipe_str)
 
