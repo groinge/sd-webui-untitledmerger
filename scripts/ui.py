@@ -162,9 +162,9 @@ def on_ui_tabs():
                         with gr.Row():
                             empty_cache_button = gr.Button(value='Empty Cache')
                             #stop_button = gr.Button(value='Stop merge')
-                #with gr.Row():
-                #    clude = gr.Textbox(max_lines=1,label='Include/Exclude:',value='',lines=1,scale=2)
-                #    clude_selector = gr.Radio()
+                """with gr.Row():
+                    clude = gr.Textbox(max_lines=1,label='Include/Exclude:',info='Entered targets will remain as model_a when set to \'Exclude\', or will be the only ones to be merged if set to \'Include\'',value='',lines=1,scale=4)
+                    clude_mode = gr.Radio(label="",choices=["Exclude","Include exclusively"],value='Exclude',min_width=250,scale=1)"""
                 discard = gr.Textbox(max_lines=1,label='Discard:',info="Targets will be removed from the model, separate with whitespace",value='model_ema',lines=1,scale=2)
                     
 
@@ -307,7 +307,9 @@ def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,edit
 
     recipe['checkpoints'] = checkpoints
     recipe['primary_checkpoint'] = checkpoints[0]
-    recipe['discard'] = re.findall(r'[^\s]+', discard, flags=re.I|re.M)
+    if discard:
+        recipe['discard'] = re.findall(r'[^\s]+', discard, flags=re.I|re.M)
+    """recipe['clude'] = [clude_mode.lower(),*re.findall(r'[^\s]+', clude, flags=re.I|re.M)]"""
 
     sd_models.unload_model_weights(shared.sd_model)
     sd_unet.apply_unet("None")
@@ -386,7 +388,7 @@ def create_name(checkpoints,calcmode,alpha):
         
 
 def save_loaded_model(name,settings):
-    if shared.sd_model.sd_checkpoint_info.short_title != cmn.last_merge_tasks_hash:
+    if shared.sd_model.sd_checkpoint_info.short_title != hash(cmn.last_merge_tasks):
         gr.Warning('Loaded model is not a unsaved merged model.')
         return
 
@@ -450,6 +452,9 @@ def change_preferred_device(input):
     if dtype == 'float16': cmn.precision=torch.float16
     else: cmn.precision = torch.float32
 
+
 def checkpoint_changed(name):
+    if name == "":
+        return plaintext_to_html('None | None',classname='untitled_sd_version')
     sdversion, dtype = misc_util.id_checkpoint(name)
     return plaintext_to_html(f"{sdversion} | {str(dtype).split('.')[1]}",classname='untitled_sd_version')
