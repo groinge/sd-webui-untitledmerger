@@ -16,7 +16,7 @@ low_vram = False
 loaded_checkpoints = None
 primary = ""
 
-last_merge_tasks_hash = ""
+last_merge_tasks = tuple()
 
 #Components
 

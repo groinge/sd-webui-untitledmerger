@@ -119,21 +119,21 @@ def tensor_size(t: torch.Tensor) -> int:
 
 cmn.tensor_cache = tCache(cmn.cache_size)
 
-
 def prepare_merge(recipe,timer) -> dict:
     checkpoints = recipe['checkpoints']
     tasks_recipe = recipe['targets']
+    discard = recipe.get('discard',[])
     cmn.primary = os.path.basename(recipe['primary_checkpoint'])
     
     with safe_open_multiple(checkpoints,device=cmn.device) as cmn.loaded_checkpoints:
         state_dict_keys = cmn.loaded_checkpoints[cmn.primary].keys()
 
-        tasks = parse_recipe(tasks_recipe,state_dict_keys,cmn.primary)
+        tasks = parse_recipe(tasks_recipe,state_dict_keys,cmn.primary,discard)
         tasks_copy = copy(tasks)
 
         state_dict = {}
         #Reuse merged tensors from the last merge's loaded model, if availible
-        if shared.sd_model.sd_checkpoint_info.short_title == cmn.last_merge_tasks_hash:
+        if shared.sd_model.sd_checkpoint_info.short_title == hash(cmn.last_merge_tasks):
             state_dict,tasks = get_tensors_from_loaded_model(state_dict,tasks)
         
         timer.record('Prepare merge')
@@ -145,21 +145,22 @@ def prepare_merge(recipe,timer) -> dict:
             clear_cache()
             raise
     
-    cmn.last_merge_tasks_hash = str(hash(tuple(tasks_copy)))
+    cmn.last_merge_tasks = tuple(tasks_copy)
     state_dict.update(dict(results))
     
     timer.record('Merge')
     return state_dict
 
 
-def parse_recipe(recipe,keys,primary) -> list:
+def parse_recipe(recipe,keys,primary,discard) -> list:
     tasks = []
-
-    assigned_keys = assign_keys_to_targets(list(recipe.keys()),keys)
+    discard_keys,keys = assign_keys_to_targets(discard,keys)
+    assigned_keys,_ = assign_keys_to_targets(list(recipe.keys()),keys)
     recipe = apply_inheritance(recipe)
 
     for key in keys:
-        if key in SKIP_KEYS or 'model_ema' in key:
+        if key in discard_keys:continue
+        elif key in SKIP_KEYS or 'model_ema' in key:
             tasks.append(create_task(key,'checkpoint',primary))
         elif key in assigned_keys.keys():
             tasks.append(create_task(key,*list(recipe[assigned_keys[key]].items())[0]))
@@ -221,11 +222,12 @@ def assign_keys_to_targets(targets,keys) -> dict:
             keystext = keystext.replace(key+"\n","")
 
         assigned_keys.update(target_dict)
-    return assigned_keys
+    remaining_keys = [x for x in keystext.split('\n') if x]
+    return assigned_keys, remaining_keys
 
 
 def get_tensors_from_loaded_model(state_dict,tasks) -> dict:
-        intersected = set(cmn.last_merge_tasks_hash).intersection(set(tasks))
+        intersected = set(cmn.last_merge_tasks).intersection(set(tasks))
         if intersected:
             #clear loras from model
             with torch.no_grad():
@@ -265,7 +267,6 @@ def apply_inheritance(recipe):
             recipe[target] = deepcopy(recipe['all'])
             list(recipe[target].values())[0]['alpha'] = params
     return recipe
-
 
 def clear_cache():
     cmn.tensor_cache.__init__(cmn.cache_size)

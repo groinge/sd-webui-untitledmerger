@@ -3,7 +3,7 @@ import os,yaml,re
 import torch,safetensors,safetensors.torch
 from modules import sd_models,script_callbacks,scripts,shared,devices,sd_unet,sd_hijack,sd_models_config,ui_components,paths_internal,ui_loadsave,script_loading,paths
 from modules.timer import Timer
-from modules.ui_common import create_refresh_button,create_output_panel
+from modules.ui_common import create_refresh_button,create_output_panel,plaintext_to_html
 from scripts.untitled import merger,misc_util
 import scripts.common as cmn
 from copy import deepcopy
@@ -105,13 +105,8 @@ CALCMODE_PRESETS = {
                 checkpoint_c: model_c"""
 }
 
-def centered_plaintext_html(x):
-    return f"<html><head><style>p {{text-align: center;}}</style></head><body><p>{x}</p></body></html>"
-    
-
-
 def on_ui_tabs():
-    with gr.Blocks() as cmn.ui:
+    with gr.Blocks() as ui:
         with ui_components.ResizeHandleRow():
             with gr.Column():
                 status = gr.Textbox(max_lines=1,label="",info="",interactive=False,render=False)
@@ -122,14 +117,14 @@ def on_ui_tabs():
                         with gr.Row():
                             model_a = gr.Dropdown(checkpoints_no_pickles(), label="model_a",scale=slider_scale)
                             swap_models_AB = gr.Button(value='⇆', elem_classes=["tool"],scale=1)
-                        model_a_info = gr.HTML(centered_plaintext_html('None | None'))
+                        model_a_info = gr.HTML(plaintext_to_html('None | None',classname='untitled_sd_version'))
                         model_a.change(fn=checkpoint_changed,inputs=model_a,outputs=model_a_info)
 
                     with gr.Column(variant='compact',min_width=150,scale=slider_scale):
                         with gr.Row():
                             model_b = gr.Dropdown(checkpoints_no_pickles(), label="model_b",scale=slider_scale)
                             swap_models_BC = gr.Button(value='⇆', elem_classes=["tool"],scale=1)
-                        model_b_info = gr.HTML(centered_plaintext_html('None | None'))
+                        model_b_info = gr.HTML(plaintext_to_html('None | None',classname='untitled_sd_version'))
                         model_b.change(fn=checkpoint_changed,inputs=model_b,outputs=model_b_info)
 
                     with gr.Column(variant='compact',min_width=150,scale=slider_scale):
@@ -137,7 +132,7 @@ def on_ui_tabs():
                             model_c = gr.Dropdown(checkpoints_no_pickles(), label="model_c",scale=slider_scale)
                             refresh_button = create_refresh_button([model_a,model_b,model_c], sd_models.list_models,lambda: {"choices": checkpoints_no_pickles()},"refresh_checkpoints")
                             refresh_button.update(scale=1,min_width=50)
-                        model_c_info = gr.HTML(centered_plaintext_html('None | None'))
+                        model_c_info = gr.HTML(plaintext_to_html('None | None',classname='untitled_sd_version'))
                         model_c.change(fn=checkpoint_changed,inputs=model_c,outputs=model_c_info)
 
                     def swapvalues(x,y): return gr.update(value=y), gr.update(value=x)
@@ -166,12 +161,15 @@ def on_ui_tabs():
                         merge_button = gr.Button(value='Merge',variant='primary')
                         with gr.Row():
                             empty_cache_button = gr.Button(value='Empty Cache')
-
+                            #stop_button = gr.Button(value='Stop merge')
+                #with gr.Row():
+                #    clude = gr.Textbox(max_lines=1,label='Include/Exclude:',value='',lines=1,scale=2)
+                #    clude_selector = gr.Radio()
                 discard = gr.Textbox(max_lines=1,label='Discard:',info="Targets will be removed from the model, separate with whitespace",value='model_ema',lines=1,scale=2)
                     
 
                 with gr.Row(variant='panel'):
-                    device_selector = gr.Radio(label='Preferred device/dtype for merging:',info='float16 is probably useless',choices=['cuda/float16', 'cuda/float32', 'cpu/float32'],value = 'cuda/float32' )
+                    device_selector = gr.Radio(label='Preferred device/dtype for merging:',info='float16 is probably useless',choices=['cuda/float16', 'cuda/float32', 'cpu/float32'],value = 'cuda/float16' )
                     worker_count = gr.Slider(step=2,minimum=2,value=cmn.threads,maximum=16,label='Worker thread count:',info=('Relevant for both cuda and CPU merging. Using too many threads can harm performance.'))
                     def worker_count_fn(x): cmn.threads = int(x)
                     worker_count.release(fn=worker_count_fn,inputs=worker_count)
@@ -244,15 +242,16 @@ def on_ui_tabs():
                         disable_all.click(fn=lambda: gr.update(value = []),outputs=slidertoggles)
                 with gr.Accordion(label='Recipe editor',open=True):
                     recipe_editor = gr.Code(value=EXAMPLE,lines=20,language='yaml',label='yaml')
-                    with gr.Accordion(label='Test target selector',open=False):
-                        target_tester = gr.Textbox(max_lines=1,label="",info="",interactive=True,placeholder='out.4.tran.norm.weight')
-                        target_tester_display = gr.Textbox(max_lines=40,lines=40,label="Targeted keys:",info="",interactive=False)
-                        target_tester.change(fn=test_regex,inputs=[target_tester,model_a],outputs=target_tester_display,show_progress='minimal')
+
 
             with gr.Column():
                 status.render()
                 with gr.Tab(label='😫'):
                     result_gallery, html_info_x, html_info, html_log = create_output_panel("txt2img", shared.opts.outdir_txt2img_samples)   
+                with gr.Tab(label='Model keys'):
+                    target_tester = gr.Textbox(max_lines=1,label="",info="",interactive=True,placeholder='out.4.tran.norm.weight')
+                    target_tester_display = gr.Textbox(max_lines=40,lines=40,label="Targeted keys:",info="",interactive=False)
+                    target_tester.change(fn=test_regex,inputs=[target_tester,model_a],outputs=target_tester_display,show_progress='minimal')
 
 
             empty_cache_button.click(fn=merger.clear_cache,outputs=status)
@@ -260,13 +259,14 @@ def on_ui_tabs():
 
         
 
-    return [(cmn.ui, "Untitled merger", "untitled_merger")]
+    return [(ui, "Untitled merger", "untitled_merger")]
 
 script_callbacks.on_ui_tabs(on_ui_tabs)
 
 
 def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,editor,save_name,save_settings,discard):
     timer = Timer()
+    cmn.stop = False
 
     model_variables = {'model_a':model_a.split(' ')[0],'model_b':model_b.split(' ')[0],'model_c':model_c.split(' ')[0]}
 
@@ -315,12 +315,11 @@ def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,edit
     devices.torch_gc()
 
     #Actual main merge process begins here:
-
     state_dict = merger.prepare_merge(recipe,timer)
 
     merge_name = create_name(checkpoints,calcmode,slider_a)
     checkpoint_info = deepcopy(sd_models.get_closet_checkpoint_match(os.path.basename(recipe['primary_checkpoint'])))
-    checkpoint_info.short_title = cmn.last_merge_tasks_hash
+    checkpoint_info.short_title = hash(cmn.last_merge_tasks)
     checkpoint_info.name_for_extra = '_TEMP_MERGE_'+merge_name
 
     if 'Autosave' in save_settings:
@@ -377,7 +376,7 @@ def create_name(checkpoints,calcmode,alpha):
     except:pass
     for filename in checkpoints:
         name = os.path.basename(os.path.splitext(filename)[0]).lower()
-        segments = re.findall(r'^\w{0,10}|[ev]\d{1,3}|(?<=\D)\d{1,3}(?=.*\.)|xl',name)
+        segments = re.findall(r'^.{0,10}|[ev]\d{1,3}|(?<=\D)\d{1,3}(?=.*\.)|xl',name)
         abridgedname = segments.pop(0).title()
         for segment in set(segments):
             abridgedname += "-"+segment.upper()
@@ -453,4 +452,4 @@ def change_preferred_device(input):
 
 def checkpoint_changed(name):
     sdversion, dtype = misc_util.id_checkpoint(name)
-    return centered_plaintext_html(f"{sdversion} | {str(dtype).split('.')[1]}")
+    return plaintext_to_html(f"{sdversion} | {str(dtype).split('.')[1]}",classname='untitled_sd_version')
