@@ -1,17 +1,16 @@
 import gradio as gr
-import os,yaml,torch,re
+import os,yaml,re
+import torch,safetensors,safetensors.torch
 from modules import sd_models,script_callbacks,scripts,shared,devices,sd_unet,sd_hijack,sd_models_config,ui_components,paths_internal,ui_loadsave,script_loading,paths
 from modules.timer import Timer
-from modules.ui_common import create_refresh_button,create_output_panel,plaintext_to_html
+from modules.ui_common import create_refresh_button,create_output_panel
 from scripts.untitled import merger,misc_util
 import scripts.common as cmn
-from safetensors.torch import save_file, safe_open
 from copy import deepcopy
 
 networks = script_loading.load_module(os.path.join(paths.extensions_builtin_dir,'Lora','networks.py'))
 
 checkpoints_no_pickles = lambda: [checkpoint for checkpoint in sd_models.checkpoint_tiles() if checkpoint.split(' ')[0].endswith('.safetensors')]
-
 
 extension_path = scripts.basedir()
 
@@ -106,6 +105,11 @@ CALCMODE_PRESETS = {
                 checkpoint_c: model_c"""
 }
 
+def centered_plaintext_html(x):
+    return f"<html><head><style>p {{text-align: center;}}</style></head><body><p>{x}</p></body></html>"
+    
+
+
 def on_ui_tabs():
     with gr.Blocks() as cmn.ui:
         with ui_components.ResizeHandleRow():
@@ -114,16 +118,27 @@ def on_ui_tabs():
                 #### MODEL SELECTION
                 with gr.Row():
                     slider_scale = 5
+                    with gr.Column(variant='compact',min_width=150,scale=slider_scale):
+                        with gr.Row():
+                            model_a = gr.Dropdown(checkpoints_no_pickles(), label="model_a",scale=slider_scale)
+                            swap_models_AB = gr.Button(value='⇆', elem_classes=["tool"],scale=1)
+                        model_a_info = gr.HTML(centered_plaintext_html('None | None'))
+                        model_a.change(fn=checkpoint_changed,inputs=model_a,outputs=model_a_info)
 
-                    model_a = gr.Dropdown(checkpoints_no_pickles(), label="model_a",scale=slider_scale)
-                    swap_models_AB = gr.Button(value='⇆', elem_classes=["tool"],scale=1)
+                    with gr.Column(variant='compact',min_width=150,scale=slider_scale):
+                        with gr.Row():
+                            model_b = gr.Dropdown(checkpoints_no_pickles(), label="model_b",scale=slider_scale)
+                            swap_models_BC = gr.Button(value='⇆', elem_classes=["tool"],scale=1)
+                        model_b_info = gr.HTML(centered_plaintext_html('None | None'))
+                        model_b.change(fn=checkpoint_changed,inputs=model_b,outputs=model_b_info)
 
-                    model_b = gr.Dropdown(checkpoints_no_pickles(), label="model_b",scale=slider_scale)
-                    swap_models_BC = gr.Button(value='⇆', elem_classes=["tool"],scale=1)
-
-                    model_c = gr.Dropdown(checkpoints_no_pickles(), label="model_c",scale=slider_scale)
-                    refresh_button = create_refresh_button([model_a,model_b,model_c], lambda:None,lambda: {"choices": checkpoints_no_pickles()},"refresh_checkpoints")
-                    refresh_button.update(scale=1)
+                    with gr.Column(variant='compact',min_width=150,scale=slider_scale):
+                        with gr.Row():
+                            model_c = gr.Dropdown(checkpoints_no_pickles(), label="model_c",scale=slider_scale)
+                            refresh_button = create_refresh_button([model_a,model_b,model_c], sd_models.list_models,lambda: {"choices": checkpoints_no_pickles()},"refresh_checkpoints")
+                            refresh_button.update(scale=1,min_width=50)
+                        model_c_info = gr.HTML(centered_plaintext_html('None | None'))
+                        model_c.change(fn=checkpoint_changed,inputs=model_c,outputs=model_c_info)
 
                     def swapvalues(x,y): return gr.update(value=y), gr.update(value=x)
                     swap_models_AB.click(fn=swapvalues,inputs=[model_a,model_b],outputs=[model_a,model_b])
@@ -145,11 +160,15 @@ def on_ui_tabs():
                         with gr.Row():
                             save_settings = gr.CheckboxGroup(label = " ",choices=["Autosave","Overwrite","fp16"],value=['fp16'],interactive=True,scale=2,min_width=100)
                             save_loaded = gr.Button(value='Save loaded checkpoint',size='sm',scale=1)
-                            save_loaded.click(fn=save_from_loaded_model, inputs=[save_name,save_settings],outputs=status)
+                            save_loaded.click(fn=save_loaded_model, inputs=[save_name,save_settings],outputs=status)
                     with gr.Column():
                         #### MERGE BUTTONS
                         merge_button = gr.Button(value='Merge',variant='primary')
-                        empty_cache_button = gr.Button(value='Empty Cache')
+                        with gr.Row():
+                            empty_cache_button = gr.Button(value='Empty Cache')
+
+                discard = gr.Textbox(max_lines=1,label='Discard:',info="Targets will be removed from the model, separate with whitespace",value='model_ema',lines=1,scale=2)
+                    
 
                 with gr.Row(variant='panel'):
                     device_selector = gr.Radio(label='Preferred device/dtype for merging:',info='float16 is probably useless',choices=['cuda/float16', 'cuda/float32', 'cpu/float32'],value = 'cuda/float32' )
@@ -232,10 +251,12 @@ def on_ui_tabs():
 
             with gr.Column():
                 status.render()
-                result_gallery, html_info_x, html_info, html_log = create_output_panel("txt2img", shared.opts.outdir_txt2img_samples)    
+                with gr.Tab(label='😫'):
+                    result_gallery, html_info_x, html_info, html_log = create_output_panel("txt2img", shared.opts.outdir_txt2img_samples)   
 
-            empty_cache_button.click(fn=merger.clear_cache)
-            merge_button.click(fn=start_merge, inputs=[mode_selector,model_a,model_b,model_c,alpha,beta,gamma,recipe_editor,save_name,save_settings],outputs=status)
+
+            empty_cache_button.click(fn=merger.clear_cache,outputs=status)
+            merge_button.click(fn=start_merge, inputs=[mode_selector,model_a,model_b,model_c,alpha,beta,gamma,recipe_editor,save_name,save_settings,discard],outputs=status)
 
         
 
@@ -244,7 +265,7 @@ def on_ui_tabs():
 script_callbacks.on_ui_tabs(on_ui_tabs)
 
 
-def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,editor,save_name,save_settings):
+def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,editor,save_name,save_settings,discard):
     timer = Timer()
 
     model_variables = {'model_a':model_a.split(' ')[0],'model_b':model_b.split(' ')[0],'model_c':model_c.split(' ')[0]}
@@ -286,6 +307,7 @@ def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,edit
 
     recipe['checkpoints'] = checkpoints
     recipe['primary_checkpoint'] = checkpoints[0]
+    recipe['discard'] = re.findall(r'[^\s]+', discard, flags=re.I|re.M)
 
     sd_models.unload_model_weights(shared.sd_model)
     sd_unet.apply_unet("None")
@@ -293,6 +315,7 @@ def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,edit
     devices.torch_gc()
 
     #Actual main merge process begins here:
+
     state_dict = merger.prepare_merge(recipe,timer)
 
     merge_name = create_name(checkpoints,calcmode,slider_a)
@@ -339,7 +362,7 @@ def test_regex(input,model_a):
 
     path = sd_models.get_closet_checkpoint_match(model_a).filename
 
-    with safe_open(path,framework='pt',device='cpu') as file:
+    with safetensors.torch.safe_open(path,framework='pt',device='cpu') as file:
         keys = file.keys()
 
     selected_keys = re.findall(regex,'\n'.join(keys),re.M)
@@ -363,7 +386,7 @@ def create_name(checkpoints,calcmode,alpha):
     return new_name
         
 
-def save_from_loaded_model(name,settings):
+def save_loaded_model(name,settings):
     if shared.sd_model.sd_checkpoint_info.short_title != cmn.last_merge_tasks_hash:
         gr.Warning('Loaded model is not a unsaved merged model.')
         return
@@ -387,8 +410,6 @@ def save_from_loaded_model(name,settings):
 def save_state_dict(state_dict,name,settings,timer=None):
     fileext = ".fp16.safetensors" if 'fp16' in settings else '.safetensors'
 
-    name = ''.join(re.findall(r'[\w \~\-\.\+\[\]\(\)]+',name))
-
     filename_no_ext = os.path.join(paths_internal.models_path,'Stable-diffusion',name)
     try:
         filename_no_ext = filename_no_ext[0:225]
@@ -406,12 +427,12 @@ def save_state_dict(state_dict,name,settings,timer=None):
             state_dict[key] = tensor.type(torch.float16)
 
     try:
-        save_file(state_dict,filename)
-    except:
-        print('Checkpoint save failed. Applying contiguous to tensors and trying again...')
+        safetensors.torch.save_file(state_dict,filename)
+    except safetensors.SafetensorError:
+        print('Failed to save checkpoint. Applying contiguous to tensors and trying again...')
         for key,tensor in state_dict.items():
             state_dict[key] = tensor.contiguous()
-        save_file(state_dict,filename)
+        safetensors.torch.save_file(state_dict,filename)
 
     try:
         timer.record('Save checkpoint')
@@ -424,9 +445,12 @@ def save_state_dict(state_dict,name,settings,timer=None):
     return checkpoint_info
 
 
-
 def change_preferred_device(input):
     cmn.device,dtype = input.split('/')
                      
     if dtype == 'float16': cmn.precision=torch.float16
     else: cmn.precision = torch.float32
+
+def checkpoint_changed(name):
+    sdversion, dtype = misc_util.id_checkpoint(name)
+    return centered_plaintext_html(f"{sdversion} | {str(dtype).split('.')[1]}")

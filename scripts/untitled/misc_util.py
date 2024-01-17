@@ -1,8 +1,10 @@
-import re
+import re,safetensors.torch,safetensors,torch
+from modules import sd_models
 
 BASE_SELECTORS = {
     "all":  "",
     "clip": "cond",
+    "base": "cond",
     "unet": "model\\.diffusion_model",
     "in":   "model\\.diffusion_model\\.input_blocks",
     "out":  "model\\.diffusion_model\\.output_blocks",
@@ -38,4 +40,48 @@ def target_to_regex(target_name: str) -> str:
             regex += f".*{re.escape(selector)}"
     regex += ".*$"
     return regex
+    
+versions = {
+    "v1":'cond_stage_model.transformer.text_model.embeddings.token_embedding.weight',
+    "v2":'cond_stage_model.model.token_embedding.weight',
+    'xl':'conditioner.embedders.0.transformer.text_model.embeddings.token_embedding.weight'
+}
+
+def id_checkpoint(name):
+    filename = sd_models.get_closet_checkpoint_match(name).filename
+    with safetensors.torch.safe_open(filename,framework='pt',device='cpu') as st_file:
+
+        def gettensor(key):
+            try:
+                return st_file.get_tensor(key)
+            except safetensors.SafetensorError:
+                return None
+            
+        keys = st_file.keys()
+        
+        if versions['v1'] in keys:
+            diffusion_model_input = gettensor('model.diffusion_model.input_blocks.0.0.weight')
+            dtype = diffusion_model_input.dtype
+            if diffusion_model_input.shape[1] == 9:
+                return 'v1-inpainting',dtype
+            if diffusion_model_input.shape[1] == 8:
+                return 'v1-instruct-pix2pix',dtype
+            return 'v1',dtype
+        
+        if versions['xl'] in keys:
+            clip_embedder = gettensor('conditioner.embedders.1.model.ln_final.weight')
+            if clip_embedder is not None:
+                return 'SDXL',clip_embedder.dtype
+            return 'SDXL-refiner',gettensor('conditioner.embedders.1.model.ln_final.weight').dtype
+            
+        if versions['v2'] in keys:
+            diffusion_model_input = gettensor('model.diffusion_model.input_blocks.0.0.weight')
+            dtype = diffusion_model_input.dtype
+            if diffusion_model_input.shape[1] == 9:
+                return 'v2-inpainting',dtype
+            return 'v2',dtype
+            
+        
+        return 'Unknown',gettensor(keys[0]).dtype
+
 

@@ -184,6 +184,7 @@ def initialize_merge(taskinfo) -> tuple:
 BASE_SELECTORS_PRIORITY = {
     "all":  0,
     "clip": 1,
+    "base": 1,
     "unet": 1,
     "in":   2,
     "out":  2,
@@ -271,3 +272,4 @@ def clear_cache():
     gc.collect()
     devices.torch_gc()
     torch.cuda.empty_cache()
+    return "All caches cleared"
