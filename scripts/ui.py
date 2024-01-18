@@ -357,13 +357,14 @@ def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,edit
 def load_merged_state_dict(state_dict,checkpoint_info):
     config = sd_models_config.find_checkpoint_config(state_dict, checkpoint_info)
     checkpoint_info.filename = os.path.join(symlink_path, os.path.basename(checkpoint_info.filename))
-    sd_models.checkpoint_aliases[checkpoint_info.filename] = checkpoint_info
+    sd_models.checkpoint_aliases[checkpoint_info.name] = checkpoint_info
     
     if shared.sd_model.used_config == config:
         print('Loading weights using already loaded model...')
 
         load_timer = Timer()
-        sd_models.load_model_weights(shared.sd_model, checkpoint_info, state_dict, load_timer)
+        with NoHashing():
+            sd_models.load_model_weights(shared.sd_model, checkpoint_info, state_dict, load_timer)
         print('Loaded weights in: '+load_timer.summary())
 
         sd_hijack.model_hijack.hijack(shared.sd_model)
@@ -374,8 +375,9 @@ def load_merged_state_dict(state_dict,checkpoint_info):
         sd_unet.apply_unet()
     else:
         sd_models.model_data.__init__()
-        sd_models.load_model(checkpoint_info=checkpoint_info, already_loaded_state_dict=state_dict)
-    shared.opts.sd_model_checkpoint = checkpoint_info.filename
+        with NoHashing():
+            sd_models.load_model(checkpoint_info=checkpoint_info, already_loaded_state_dict=state_dict)
+    shared.opts.sd_model_checkpoint = checkpoint_info.name
 
 
 def test_regex(input,model_a):
@@ -479,3 +481,13 @@ def checkpoint_changed(name):
         return plaintext_to_html('None | None',classname='untitled_sd_version')
     sdversion, dtype = misc_util.id_checkpoint(name)
     return plaintext_to_html(f"{sdversion} | {str(dtype).split('.')[1]}",classname='untitled_sd_version')
+
+class NoHashing:
+    def __init__(self):
+        self.orig_setting = shared.cmd_opts.no_hashing
+
+    def __enter__(self):
+        shared.cmd_opts.no_hashing = True
+
+    def __exit__(self,*args):
+        shared.cmd_opts.no_hashing = self.orig_setting
