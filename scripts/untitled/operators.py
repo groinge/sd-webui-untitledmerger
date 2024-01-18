@@ -101,12 +101,6 @@ def traindiff(taskinfo) -> torch.Tensor:
 
 
 #From https://github.com/hako-mikan/sd-webui-supermerger
-
-@cache_operation
-@recursion
-def similarity(a: torch.Tensor, b: torch.Tensor, taskinfo):
-    return extract_super(None,a,b,taskinfo)
-
 def extract_super(base: torch.Tensor|None,a: torch.Tensor, b: torch.Tensor, taskinfo) -> torch.Tensor:
     alpha = taskinfo['alpha']
     beta = taskinfo['beta']
@@ -126,6 +120,11 @@ def extract_super(base: torch.Tensor|None,a: torch.Tensor, b: torch.Tensor, task
     return result.to(dtype)
 
 extract = recursion(extract_super)
+
+@cache_operation
+@recursion
+def similarity(a: torch.Tensor, b: torch.Tensor, taskinfo):
+    return extract_super(None,a,b,taskinfo)
 
 
 #From https://github.com/hako-mikan/sd-webui-supermerger

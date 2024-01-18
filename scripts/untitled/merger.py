@@ -124,11 +124,12 @@ def prepare_merge(recipe,timer) -> dict:
     tasks_recipe = recipe['targets']
     discard = recipe.get('discard',[])
     cmn.primary = os.path.basename(recipe['primary_checkpoint'])
+    clude = recipe.get('clude')
     
     with safe_open_multiple(checkpoints,device=cmn.device) as cmn.loaded_checkpoints:
         state_dict_keys = cmn.loaded_checkpoints[cmn.primary].keys()
 
-        tasks = parse_recipe(tasks_recipe,state_dict_keys,cmn.primary,discard)
+        tasks = parse_recipe(tasks_recipe,state_dict_keys,cmn.primary,discard,clude)
         tasks_copy = copy(tasks)
 
         state_dict = {}
@@ -136,6 +137,10 @@ def prepare_merge(recipe,timer) -> dict:
         if shared.sd_model.sd_checkpoint_info.short_title == hash(cmn.last_merge_tasks):
             state_dict,tasks = get_tensors_from_loaded_model(state_dict,tasks)
         
+        if cmn.trash_model:
+            shared.sd_model.to(device='meta')
+            devices.torch_gc()
+
         timer.record('Prepare merge')
         try:
             with ThreadPoolExecutor(max_workers=cmn.threads) as executor:
@@ -152,10 +157,13 @@ def prepare_merge(recipe,timer) -> dict:
     return state_dict
 
 
-def parse_recipe(recipe,keys,primary,discard) -> list:
+def parse_recipe(recipe,keys,primary,discard,clude) -> list:
+    cludemode = clude.pop(0)
     tasks = []
+
     discard_keys,keys = assign_keys_to_targets(discard,keys)
-    assigned_keys,_ = assign_keys_to_targets(list(recipe.keys()),keys)
+    include_keys,exclude_keys = assign_keys_to_targets(clude,keys)
+    assigned_keys,_ = assign_keys_to_targets(list(recipe.keys()),include_keys if cludemode == 'include' else exclude_keys)
     recipe = apply_inheritance(recipe)
 
     for key in keys:

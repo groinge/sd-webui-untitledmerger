@@ -1,6 +1,22 @@
-#The multipliers in this only apply to alpha (What slider_a controls), you can use slider_b or slider_c instead of numbers to use them to adjust alpha on the target.
-#And don't remove 'targets:', it's loading-bearing.
+#The multipliers in this only apply to alpha (What slider_a controls)
+#You can enter slider_b or slider_c instead of a number to use them to adjust alpha on the target.
+#And don't remove 'targets:', it's load-bearing.
 targets:
 #  in.7.layers: 1
 #  out.3-7: 0.5
 #  clip.4.attn: slider_b
+#  unet:
+#    add:
+#      alpha: slider_b
+#      sources:
+#        checkpoint: model_a
+#        smooth:
+#          sources:
+#            similarity:
+#              alpha: slider_a
+#              beta: 1
+#              gamma: slider_c
+#              sources:
+#                checkpoint_a: model_b
+#                checkpoint_b: model_c
+

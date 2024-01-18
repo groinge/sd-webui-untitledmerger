@@ -156,20 +156,21 @@ def on_ui_tabs():
                             save_settings = gr.CheckboxGroup(label = " ",choices=["Autosave","Overwrite","fp16"],value=['fp16'],interactive=True,scale=2,min_width=100)
                             save_loaded = gr.Button(value='Save loaded checkpoint',size='sm',scale=1)
                             save_loaded.click(fn=save_loaded_model, inputs=[save_name,save_settings],outputs=status)
+
                     with gr.Column():
                         #### MERGE BUTTONS
                         merge_button = gr.Button(value='Merge',variant='primary')
                         with gr.Row():
                             empty_cache_button = gr.Button(value='Empty Cache')
                             #stop_button = gr.Button(value='Stop merge')
-                """with gr.Row():
-                    clude = gr.Textbox(max_lines=1,label='Include/Exclude:',info='Entered targets will remain as model_a when set to \'Exclude\', or will be the only ones to be merged if set to \'Include\'',value='',lines=1,scale=4)
-                    clude_mode = gr.Radio(label="",choices=["Exclude","Include exclusively"],value='Exclude',min_width=250,scale=1)"""
-                discard = gr.Textbox(max_lines=1,label='Discard:',info="Targets will be removed from the model, separate with whitespace",value='model_ema',lines=1,scale=2)
+                with gr.Row():
+                    clude = gr.Textbox(max_lines=1,label='Include/Exclude:',info='Entered targets will remain as model_a when set to \'Exclude\', and will be the only ones to be merged if set to \'Include\'. Separate with withspace.',value='',lines=1,scale=4)
+                    clude_mode = gr.Radio(label="",info="",choices=["Exclude",("Include exclusively",'include')],value='Exclude',min_width=300,scale=1)
+                discard = gr.Textbox(max_lines=1,label='Discard:',info="Targets will be removed from the model, separate with whitespace.",value='model_ema',lines=1,scale=2)
                     
 
                 with gr.Row(variant='panel'):
-                    device_selector = gr.Radio(label='Preferred device/dtype for merging:',info='float16 is probably useless',choices=['cuda/float16', 'cuda/float32', 'cpu/float32'],value = 'cuda/float16' )
+                    device_selector = gr.Radio(label='Preferred device/dtype for merging:',info='',choices=['cuda/float16', 'cuda/float32', 'cpu/float32'],value = 'cuda/float16' )
                     worker_count = gr.Slider(step=2,minimum=2,value=cmn.threads,maximum=16,label='Worker thread count:',info=('Relevant for both cuda and CPU merging. Using too many threads can harm performance.'))
                     def worker_count_fn(x): cmn.threads = int(x)
                     worker_count.release(fn=worker_count_fn,inputs=worker_count)
@@ -255,7 +256,7 @@ def on_ui_tabs():
 
 
             empty_cache_button.click(fn=merger.clear_cache,outputs=status)
-            merge_button.click(fn=start_merge, inputs=[mode_selector,model_a,model_b,model_c,alpha,beta,gamma,recipe_editor,save_name,save_settings,discard],outputs=status)
+            merge_button.click(fn=start_merge, inputs=[mode_selector,model_a,model_b,model_c,alpha,beta,gamma,recipe_editor,save_name,save_settings,discard,clude,clude_mode],outputs=status)
 
         
 
@@ -264,7 +265,7 @@ def on_ui_tabs():
 script_callbacks.on_ui_tabs(on_ui_tabs)
 
 
-def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,editor,save_name,save_settings,discard):
+def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,editor,save_name,save_settings,discard,clude,clude_mode):
     timer = Timer()
     cmn.stop = False
 
@@ -309,7 +310,7 @@ def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,edit
     recipe['primary_checkpoint'] = checkpoints[0]
     if discard:
         recipe['discard'] = re.findall(r'[^\s]+', discard, flags=re.I|re.M)
-    """recipe['clude'] = [clude_mode.lower(),*re.findall(r'[^\s]+', clude, flags=re.I|re.M)]"""
+    recipe['clude'] = [clude_mode.lower(),*re.findall(r'[^\s]+', clude, flags=re.I|re.M)]
 
     sd_models.unload_model_weights(shared.sd_model)
     sd_unet.apply_unet("None")
@@ -340,7 +341,7 @@ def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,edit
 def load_merged_state_dict(state_dict,checkpoint_info):
     config = sd_models_config.find_checkpoint_config(state_dict, checkpoint_info)
 
-    if shared.sd_model.used_config == config:
+    if not cmn.trash_model and shared.sd_model.used_config == config:
         print('Loading weights using already loaded model...')
 
         load_timer = Timer()

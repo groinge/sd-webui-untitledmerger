@@ -13,6 +13,10 @@ tensor_cache = None
 #moves finished tensors to CPU during merge to save video memory (slower)
 low_vram = False
 
+#Removes loaded model from memory at the start of the merge, requiring a new one to be initialized before loading the merge
+trash_model = False
+
+stop = False
 loaded_checkpoints = None
 primary = ""
 
