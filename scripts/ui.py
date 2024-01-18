@@ -16,6 +16,17 @@ extension_path = scripts.basedir()
 
 ext2abs = lambda *x: os.path.join(extension_path,*x)
 
+symlink_path = ext2abs("scripts","untitled","symlink")
+sd_checkpoints_path = os.path.join(paths.models_path,'Stable-diffusion')
+try:
+    os.symlink(sd_checkpoints_path,symlink_path,target_is_directory=True)
+except FileExistsError:pass
+except OSError:
+    try:
+        import _winapi
+        _winapi.CreateJunction(sd_checkpoints_path,symlink_path)
+    except FileExistsError:pass
+        
 with open(ext2abs('scripts','examplemerge.yaml'), 'r') as file:
     EXAMPLE = file.read()
 
@@ -321,14 +332,19 @@ def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,edit
     state_dict = merger.prepare_merge(recipe,timer)
 
     merge_name = create_name(checkpoints,calcmode,slider_a)
+
     checkpoint_info = deepcopy(sd_models.get_closet_checkpoint_match(os.path.basename(recipe['primary_checkpoint'])))
     checkpoint_info.short_title = hash(cmn.last_merge_tasks)
     checkpoint_info.name_for_extra = '_TEMP_MERGE_'+merge_name
+    checkpoint_info.name = checkpoint_info.name_for_extra + '.safetensors'
+    checkpoint_info.model_name = checkpoint_info.name_for_extra
+    checkpoint_info.ids = [checkpoint_info.model_name, checkpoint_info.name, checkpoint_info.name_for_extra]
 
     if 'Autosave' in save_settings:
         checkpoint_info = save_state_dict(state_dict,save_name or merge_name,save_settings,timer)
     
     load_merged_state_dict(state_dict,checkpoint_info)
+    
     timer.record('Load model')
     del state_dict
     devices.torch_gc()
@@ -340,8 +356,10 @@ def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,edit
 
 def load_merged_state_dict(state_dict,checkpoint_info):
     config = sd_models_config.find_checkpoint_config(state_dict, checkpoint_info)
-
-    if not cmn.trash_model and shared.sd_model.used_config == config:
+    checkpoint_info.filename = os.path.join(symlink_path, os.path.basename(checkpoint_info.filename))
+    sd_models.checkpoint_aliases[checkpoint_info.filename] = checkpoint_info
+    
+    if shared.sd_model.used_config == config:
         print('Loading weights using already loaded model...')
 
         load_timer = Timer()
@@ -357,6 +375,7 @@ def load_merged_state_dict(state_dict,checkpoint_info):
     else:
         sd_models.model_data.__init__()
         sd_models.load_model(checkpoint_info=checkpoint_info, already_loaded_state_dict=state_dict)
+    shared.opts.sd_model_checkpoint = checkpoint_info.filename
 
 
 def test_regex(input,model_a):
@@ -405,7 +424,8 @@ def save_loaded_model(name,settings):
     name = name or shared.sd_model.sd_checkpoint_info.name_for_extra.replace('_TEMP_MERGE_','')
 
     checkpoint_info = save_state_dict(state_dict,name,settings)
-    load_merged_state_dict(state_dict,checkpoint_info)
+    shared.sd_model.sd_checkpoint_info = checkpoint_info
+    shared.sd_model_file = checkpoint_info.filename
     return 'Model saved as: '+checkpoint_info.filename
 
     
