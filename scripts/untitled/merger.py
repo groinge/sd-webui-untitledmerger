@@ -8,7 +8,7 @@ import scripts.common as cmn
 import torch,os,re,gc
 from tqdm import tqdm
 from copy import copy,deepcopy
-from modules import devices,shared,script_loading,paths
+from modules import devices,shared,script_loading,paths,paths_internal
 
 networks = script_loading.load_module(os.path.join(paths.extensions_builtin_dir,'Lora','networks.py'))
 
@@ -27,65 +27,6 @@ SKIP_KEYS = [
     "sqrt_recipm1_alphas_cumprod"
 ]
 
-#Operator names can only have letters and "- in them
-OPERATORS = {'add': oper.add,
-             'sub': oper.sub,
-             'smooth': oper.smooth,
-             'weight-sum': oper.weight_sum,
-             'traindiff': oper.traindiff,
-             'extract': oper.extract,
-             'similarity': oper.similarity
-             }
-
-#Hashable merge info that is used as keys for the cache
-class TaskInfo:
-    def __init__(self,key, task, args, sources):
-        self.key = key
-        self.task = task
-        self.args_keys = tuple(args.keys())
-        self.args_values = tuple(args.values())
-        self.sources = tuple(sources)
-        self.hash = hash((self.key, self.task, self.args_keys, self.args_values, self.sources))
-
-    def update_hash(self):
-        self.hash = hash((self.key, self.task, self.args_keys, self.args_values, self.sources))
-
-    def __hash__(self):
-        return self.hash
-
-    def __eq__(self, other):
-        return (self.key, self.task, self.args_keys, self.args_values, self.sources) == (other.key, other.task, other.args_keys, other.args_values, other.sources)
-    
-    def start_task(self):
-        return self.task(self)
-    
-    def __getitem__(self,key):
-        i = self.args_keys.index(key)
-        return self.args_values[i]
-
-
-def create_task(key, task_input, args) -> TaskInfo: 
-    readied_sources = []
-    task_name = re.match(r"[a-z\-]*",task_input).group()
-    
-    if task_name == 'checkpoint':
-        task = oper.load_tensor
-        args = {'filename':args}
-    else:
-        task = OPERATORS[task_name]
-        args_copy = args.copy()
-        for source_task,source_args in args['sources'].items():
-            readied_sources.append(create_task(key,source_task,source_args))
-        del args_copy['sources']
-        args = args_copy
-
-    return TaskInfo(
-        key = key,
-        task = task,
-        args = args,
-        sources = readied_sources
-        )
-
 
 #Items are added at the end of the dict and removed at the beginning 
 #High overhead, so is only worth using for computationally demanding operations
@@ -95,7 +36,7 @@ class tCache:
         self.size = size
         self.footprint = 0
 
-    def append(self,key: TaskInfo,tensor):
+    def append(self,key, tensor):
         if key in self.cache:
             self.cache.move_to_end(key)
         else:
@@ -104,7 +45,7 @@ class tCache:
             self.footprint += tensor_size(tensor)
             self.clear()
 
-    def retrieve(self,key: TaskInfo):
+    def retrieve(self,key):
         tensor = self.cache[key]
         self.cache.move_to_end(key)
         return tensor.detach().clone().to(cmn.device).type(cmn.precision)
@@ -119,17 +60,14 @@ def tensor_size(t: torch.Tensor) -> int:
 
 cmn.tensor_cache = tCache(cmn.cache_size)
 
-def prepare_merge(recipe,timer) -> dict:
-    checkpoints = recipe['checkpoints']
-    tasks_recipe = recipe['targets']
-    discard = recipe.get('discard',[])
-    cmn.primary = os.path.basename(recipe['primary_checkpoint'])
-    clude = recipe.get('clude')
+
+def prepare_merge(calcmode,targets,checkpoints,slider_a,slider_b,slider_c,discard_targets,cludes,timer) -> dict:
+    cmn.primary = checkpoints[0]
     
     with safe_open_multiple(checkpoints,device=cmn.device) as cmn.loaded_checkpoints:
         state_dict_keys = cmn.loaded_checkpoints[cmn.primary].keys()
 
-        tasks = parse_recipe(tasks_recipe,state_dict_keys,cmn.primary,discard,clude)
+        tasks = parse_recipe(calcmode,targets,state_dict_keys,cmn.primary,discard_targets,cludes,checkpoints,slider_a,slider_b,slider_c,)
         tasks_copy = copy(tasks)
 
         state_dict = {}
@@ -157,29 +95,28 @@ def prepare_merge(recipe,timer) -> dict:
     return state_dict
 
 
-def parse_recipe(recipe,keys,primary,discard,clude) -> list:
+def parse_recipe(calcmode,targets,keys,primary,discard,clude,checkpoints,slider_a,slider_b,slider_c) -> list:
     cludemode = clude.pop(0)
     tasks = []
 
     discard_keys,keys = assign_keys_to_targets(discard,keys)
     include_keys,exclude_keys = assign_keys_to_targets(clude,keys)
-    assigned_keys,_ = assign_keys_to_targets(list(recipe.keys()),include_keys if cludemode == 'include' else exclude_keys)
-    recipe = apply_inheritance(recipe)
+    assigned_keys,_ = assign_keys_to_targets(targets,include_keys if cludemode == 'include' else exclude_keys)
 
     for key in keys:
         if key in discard_keys:continue
         elif key in SKIP_KEYS or 'model_ema' in key:
-            tasks.append(create_task(key,'checkpoint',primary))
+            tasks.append(oper.LoadTensor(key,primary))
         elif key in assigned_keys.keys():
-            tasks.append(create_task(key,*list(recipe[assigned_keys[key]].items())[0]))
+            tasks.append(calcmode.create_recipe(key,*checkpoints,slider_a,slider_b,slider_c))
         else: 
-            tasks.append(create_task(key,'checkpoint',primary))
+            tasks.append(oper.LoadTensor(key,primary))
     return tasks
 
 
 def initialize_merge(taskinfo) -> tuple:
     try:
-        tensor = taskinfo.start_task()
+        tensor = taskinfo.merge()
     except SafetensorError: #Fallback in case one of the secondary models lack a key present in the primary model
         tensor = cmn.loaded_checkpoints[cmn.primary].get_tensor(taskinfo.key)
 
@@ -235,21 +172,21 @@ def assign_keys_to_targets(targets,keys) -> dict:
 
 
 def get_tensors_from_loaded_model(state_dict,tasks) -> dict:
-        intersected = set(cmn.last_merge_tasks).intersection(set(tasks))
-        if intersected:
-            #clear loras from model
-            with torch.no_grad():
-                for module in shared.sd_model.modules():
-                    networks.network_restore_weights_from_backup(module)
-            old_state_dict = shared.sd_model.state_dict()
+    intersected = set(cmn.last_merge_tasks).intersection(set(tasks))
+    if intersected:
+        #clear loras from model
+        with torch.no_grad():
+            for module in shared.sd_model.modules():
+                networks.network_restore_weights_from_backup(module)
+        old_state_dict = shared.sd_model.state_dict()
 
-            for task in intersected:
-                try:
-                    state_dict[task.key] = old_state_dict[task.key]
-                except:pass
-                tasks.remove(task)
-            
-        return state_dict,tasks
+        for task in intersected:
+            try:
+                state_dict[task.key] = old_state_dict[task.key]
+            except:pass
+            tasks.remove(task)
+        
+    return state_dict,tasks
 
 
 class safe_open_multiple(object):
@@ -259,8 +196,10 @@ class safe_open_multiple(object):
         self.open_files = {}
      
     def __enter__(self):
-        for filename in self.checkpoints:
-            self.open_files[os.path.basename(filename)] = safe_open(filename,framework='pt',device=self.device)
+        for name in self.checkpoints:
+            if name:
+                filename = os.path.join(paths_internal.models_path,'Stable-diffusion',name)
+                self.open_files[name] = safe_open(filename,framework='pt',device=self.device)
         return self.open_files
 
     def __exit__(self,*args):

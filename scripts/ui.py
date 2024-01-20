@@ -4,7 +4,7 @@ import torch,safetensors,safetensors.torch
 from modules import sd_models,script_callbacks,scripts,shared,devices,sd_unet,sd_hijack,sd_models_config,ui_components,paths_internal,ui_loadsave,script_loading,paths
 from modules.timer import Timer
 from modules.ui_common import create_refresh_button,create_output_panel,plaintext_to_html
-from scripts.untitled import merger,misc_util
+from scripts.untitled import merger,misc_util,calcmodes
 import scripts.common as cmn
 from copy import deepcopy
 
@@ -30,91 +30,10 @@ except OSError:
 with open(ext2abs('scripts','examplemerge.yaml'), 'r') as file:
     EXAMPLE = file.read()
 
-CALCMODE_PRESETS = {
-'Weight-Sum':"""  'all':
-    weight-sum:
-      alpha: slider_a
-      sources:
-        checkpoint_a: model_a
-        checkpoint_b: model_b""",
+calcmode_selection = {}
+for calcmode in calcmodes.CALCMODES_LIST:
+    calcmode_selection.update({calcmode.name: calcmode})
 
-'Combined similarity':"""  'all':
-    similarity:
-      alpha: slider_a
-      beta: 0
-      gamma: slider_c
-      sources:
-        checkpoint_a: model_a
-        checkpoint_b: model_b""",
-
-'Add Difference':"""  'all':
-    add:
-      alpha: slider_a
-      sources:
-        checkpoint_a: model_a
-        sub:
-          sources:
-            checkpoint_b: model_b
-            checkpoint_c: model_c""",
-
-'Train Difference':"""  'all':
-    traindiff:
-      alpha: slider_a
-      sources:
-        checkpoint_a: model_a
-        checkpoint_b: model_b
-        checkpoint_c: model_c""",
-
-'Extract (dis)similarity':"""  'all':
-    extract:
-      alpha: slider_a
-      beta: slider_b
-      gamma: slider_c
-      sources:
-        checkpoint_a: model_a
-        checkpoint_b: model_b
-        checkpoint_c: model_c""",
-
-'Add disimilarity':"""  'all':
-    add:
-      alpha: slider_b
-      sources:
-        checkpoint_a: model_a
-        similarity:
-          alpha: slider_a
-          beta: 1
-          gamma: slider_c
-          sources:
-            checkpoint_b: model_b
-            checkpoint_c: model_c""",
-
-'Smooth Add Difference':"""  'all':
-    add:
-      alpha: slider_a
-      sources:
-        checkpoint_a: model_a
-        smooth:
-          sources:
-            sub:
-              sources:
-                checkpoint_b: model_b
-                checkpoint_c: model_c""",
-
-'Smooth Add disimilarity':"""  'all':
-    add:
-      alpha: slider_b
-      sources:
-        checkpoint_a: model_a
-        smooth:
-          sources:
-            similarity:
-              alpha: slider_a
-              beta: 1
-              gamma: slider_c
-              sources:
-                checkpoint_b: model_b
-                checkpoint_c: model_c"""
-}
 
 def on_ui_tabs():
     with gr.Blocks() as ui:
@@ -152,7 +71,7 @@ def on_ui_tabs():
 
 
                 #### MODE SELECTION
-                mode_selector = gr.Radio(label='Merge mode:',choices=list(CALCMODE_PRESETS.keys()),value=list(CALCMODE_PRESETS.keys())[0])
+                mode_selector = gr.Radio(label='Merge mode:',choices=list(calcmode_selection.keys()),value=list(calcmode_selection.keys())[0])
                 
                 ##### MAIN SLIDERS
                 with gr.Row():
@@ -181,7 +100,7 @@ def on_ui_tabs():
                     
 
                 with gr.Row(variant='panel'):
-                    device_selector = gr.Radio(label='Preferred device/dtype for merging:',info='',choices=['cuda/float16', 'cuda/float32', 'cpu/float32'],value = 'cuda/float16' )
+                    device_selector = gr.Radio(label='Preferred device/dtype for merging:',info='',choices=['cuda/float16', 'cuda/float32', 'cpu/float16', 'cpu/float32'],value = 'cuda/float16' )
                     worker_count = gr.Slider(step=2,minimum=2,value=cmn.threads,maximum=16,label='Worker thread count:',info=('Relevant for both cuda and CPU merging. Using too many threads can harm performance.'))
                     def worker_count_fn(x): cmn.threads = int(x)
                     worker_count.release(fn=worker_count_fn,inputs=worker_count)
@@ -277,51 +196,27 @@ script_callbacks.on_ui_tabs(on_ui_tabs)
 
 
 def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,editor,save_name,save_settings,discard,clude,clude_mode):
+    calcmode = calcmode_selection[calcmode]
     timer = Timer()
     cmn.stop = False
 
-    model_variables = {'model_a':model_a.split(' ')[0],'model_b':model_b.split(' ')[0],'model_c':model_c.split(' ')[0]}
-
-    if editor == '':
-        editor = 'targets:\n'
-
-    if not re.search(r'''^  all|^  'all'|^  "all"''',editor,flags=re.I|re.M):
-        recipe_str = re.sub(r'(?<=targets:\n)',CALCMODE_PRESETS[calcmode]+'\n',editor)
-    else:
-        recipe_str = editor
-
-    for model in model_variables.copy().keys():
-        if not model_variables[model] or not re.search(f"^[^#\\n]*:\\s*{model}\\b$",recipe_str,re.M):
-            del model_variables[model]
-
-    for variable, sub in {'slider_a':float(slider_a),'slider_b':float(slider_b),'slider_c':float(slider_c)}.items():
-        recipe_str = re.sub(f"\\b{variable}\\b",str(sub),recipe_str,flags=re.I|re.M)
-
-    recipe = yaml.safe_load(recipe_str)
-
-    additional_models = recipe.get('checkpoints') or {}
     checkpoints = []
-
-    for alias,name in {**model_variables, **additional_models}.items():
+    for n, model in enumerate((model_a,model_b,model_c)):
+        if n+1 > calcmode.input_models:
+            checkpoints.append("")
+            continue
+        name = model.split(' ')[0]
         checkpoint_info = sd_models.get_closet_checkpoint_match(name)
 
         assert checkpoint_info != None, 'Couldn\'t find checkpoint: '+name
         assert checkpoint_info.filename.endswith('.safetensors'), 'This extension only supports safetensors checkpoints: '+name
         
         checkpoints.append(checkpoint_info.filename)
-        recipe_str = re.sub(f"\\b{re.escape(alias)}\\b",name,recipe_str,flags=re.I|re.M)
+    else:
+        assert n+1 >= calcmode.input_models, "Missing input models"
 
-    recipe = yaml.safe_load(recipe_str)
-
-    for name,value in cmn.slidervalues.items():
-        if value is not None:
-            recipe['targets'][name] = value
-
-    recipe['checkpoints'] = checkpoints
-    recipe['primary_checkpoint'] = checkpoints[0]
-    if discard:
-        recipe['discard'] = re.findall(r'[^\s]+', discard, flags=re.I|re.M)
-    recipe['clude'] = [clude_mode.lower(),*re.findall(r'[^\s]+', clude, flags=re.I|re.M)]
+    discard_targets = re.findall(r'[^\s]+', discard, flags=re.I|re.M)
+    cludes = [clude_mode.lower(),*re.findall(r'[^\s]+', clude, flags=re.I|re.M)]
 
     sd_models.unload_model_weights(shared.sd_model)
     sd_unet.apply_unet("None")
@@ -329,11 +224,12 @@ def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,edit
     devices.torch_gc()
 
     #Actual main merge process begins here:
-    state_dict = merger.prepare_merge(recipe,timer)
+    targets = ["all"]
+    state_dict = merger.prepare_merge(calcmode,targets,checkpoints,slider_a,slider_b,slider_c,discard_targets,cludes,timer)
 
-    merge_name = create_name(checkpoints,calcmode,slider_a)
+    merge_name = create_name(checkpoints,calcmode.name,slider_a)
 
-    checkpoint_info = deepcopy(sd_models.get_closet_checkpoint_match(os.path.basename(recipe['primary_checkpoint'])))
+    checkpoint_info = deepcopy(sd_models.get_closet_checkpoint_match(model_a))
     checkpoint_info.short_title = hash(cmn.last_merge_tasks)
     checkpoint_info.name_for_extra = '_TEMP_MERGE_'+merge_name
     checkpoint_info.name = checkpoint_info.name_for_extra + '.safetensors'
@@ -353,6 +249,8 @@ def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,edit
     print(message)
     return message
 
+
+    
 
 def load_merged_state_dict(state_dict,checkpoint_info):
     config = sd_models_config.find_checkpoint_config(state_dict, checkpoint_info)
@@ -481,6 +379,7 @@ def checkpoint_changed(name):
         return plaintext_to_html('None | None',classname='untitled_sd_version')
     sdversion, dtype = misc_util.id_checkpoint(name)
     return plaintext_to_html(f"{sdversion} | {str(dtype).split('.')[1]}",classname='untitled_sd_version')
+
 
 class NoHashing:
     def __init__(self):

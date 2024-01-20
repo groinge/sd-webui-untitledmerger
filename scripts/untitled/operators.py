@@ -3,58 +3,102 @@ import scripts.common as cmn
 from copy import deepcopy
 
 
-###DECORATORS####
 
-def recursion(func):
-    def inner(taskinfo):
-        source_tensors = []
-        for source_taskinfo in taskinfo.sources:
-            source_tensor = source_taskinfo.start_task()
-            source_tensors.append(source_tensor)
+def recurse(operation):
+    source_tensors = []
+    for source_oper in operation.sources:
+        source_tensor = source_oper.merge()
+        source_tensors.append(source_tensor)
 
-        return func(*source_tensors,taskinfo)
-    return inner
-
+    return operation.oper(*source_tensors)
 
 def cache_operation(func):
-    def inner(taskinfo):
+    def inner(operation):
         try:
-            return cmn.tensor_cache.retrieve(taskinfo)
+            return cmn.tensor_cache.retrieve(operation)
         except KeyError:pass
 
-        result = func(taskinfo)
+        result = func(operation)
 
-        cmn.tensor_cache.append(taskinfo,result)
+        cmn.tensor_cache.append(operation,result)
         return result
     return inner
 
-
 ###OPERATORS####
 
-def load_tensor(taskinfo) -> torch.Tensor:
-    key = taskinfo.key
-    fname = taskinfo['filename']
-    return cmn.loaded_checkpoints[fname].get_tensor(key).to(cmn.device)
+class Operation:
+    def __init__(self,key,*sources):
+        self.key = key
+        self.sources = tuple(sources)
+        self.alpha = None
+        self.beta = None
+        self.gamma = None
+        self.merge_func = recurse
+
+    def __eq__(self, other):
+        return (self.key, self.alpha, self.beta, self.gamma, self.sources) == (other.key, other.alpha, other.beta, other.gamma, other.sources)
+    
+    def __hash__(self):
+        return hash((self.key, self.alpha, self.beta, self.gamma, self.sources))
+    
+    def oper(self,*args):
+        raise NotImplementedError
+
+    def merge(self):
+        return self.merge_func(self)
+    
+    def cache(self):
+        self.merge_func = cache_operation(recurse)
+        return self
+        
+
+class LoadTensor(Operation):
+    def __init__(self,key,alpha):
+        super().__init__(key,*tuple())
+        self.alpha = alpha
+
+    #loadtensor uses merge instead of oper as it has no model inputs, use oper everywhere else 
+    def merge(self) -> torch.Tensor:
+        return cmn.loaded_checkpoints[self.alpha].get_tensor(self.key).to(cmn.device)
 
 
-@recursion
-def weight_sum(a,b,taskinfo) -> torch.Tensor:
-    mult_b = taskinfo['alpha']
-    mult_a = 1-mult_b
+class Multiply(Operation):
+    def __init__(self,key,alpha,*sources):
+        super().__init__(key,*sources)
+        self.alpha = alpha
 
-    return a*mult_a + b*mult_b
-
-
-@recursion
-def add(a,b,taskinfo) -> torch.Tensor:
-    mult = taskinfo['alpha']
-    return a + b * mult
+    def oper(self,a) -> torch.Tensor:
+        return a * self.alpha
 
 
-@cache_operation
-@recursion
-def sub(a,b,taskinfo) -> torch.Tensor:
-    return a - b
+class Add(Operation):
+    def __init__(self,*args):
+        super().__init__(*args)
+
+    def oper(self,a,b) -> torch.Tensor:
+        return a + b
+
+
+class Sub(Operation):
+    def __init__(self,*args):
+        super().__init__(*args)
+
+    def oper(self,a,b) -> torch.Tensor:
+        return a - b
+
+
+class Smooth(Operation):
+    def __init__(self,*args):
+        super().__init__(*args)
+
+    def oper(self,a) -> torch.Tensor:
+        ###From https://github.com/hako-mikan/sd-webui-supermerger
+        # Apply median filter to the differences
+        filtered_diff = scipy.ndimage.median_filter(a.detach().cpu().to(torch.float32).numpy(), size=3)
+        # Apply Gaussian filter to the filtered differences
+        filtered_diff = scipy.ndimage.gaussian_filter(filtered_diff, sigma=1)
+        return torch.tensor(filtered_diff,dtype=cmn.precision,device=cmn.device)    
+
 
 
 #Bespoke caching and recursion logic to have the difference calculation cached independantly of the adding step
@@ -119,21 +163,8 @@ def extract_super(base: torch.Tensor|None,a: torch.Tensor, b: torch.Tensor, task
     result = base + torch.lerp(a, b, alpha) * torch.lerp(d, 1 - d, beta)
     return result.to(dtype)
 
-extract = recursion(extract_super)
 
-@cache_operation
-@recursion
 def similarity(a: torch.Tensor, b: torch.Tensor, taskinfo):
     return extract_super(None,a,b,taskinfo)
 
-
-#From https://github.com/hako-mikan/sd-webui-supermerger
-@cache_operation
-@recursion
-def smooth(a,taskinfo):
-    # Apply median filter to the differences
-    filtered_diff = scipy.ndimage.median_filter(a.detach().cpu().to(torch.float32).numpy(), size=3)
-    # Apply Gaussian filter to the filtered differences
-    filtered_diff = scipy.ndimage.gaussian_filter(filtered_diff, sigma=1)
-    return torch.tensor(filtered_diff,dtype=cmn.precision,device=cmn.device)    
     
