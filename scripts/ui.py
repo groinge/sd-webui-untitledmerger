@@ -68,15 +68,16 @@ def on_ui_tabs():
                     swap_models_AB.click(fn=swapvalues,inputs=[model_a,model_b],outputs=[model_a,model_b])
                     swap_models_BC.click(fn=swapvalues,inputs=[model_b,model_c],outputs=[model_b,model_c])
 
-
                 #### MODE SELECTION
                 mode_selector = gr.Radio(label='Merge mode:',choices=list(calcmode_selection.keys()),value=list(calcmode_selection.keys())[0])
                 
                 ##### MAIN SLIDERS
                 with gr.Row():
-                    alpha = gr.Slider(minimum=-1,step=0.01,maximum=2,label="slider_a (alpha)",value=0.5)
-                    beta = gr.Slider(minimum=-1,step=0.01,maximum=2,label="slider_b (beta)",value=0.5)
-                    gamma = gr.Slider(minimum=0,step=0.01,maximum=2,label="slider_c (gamma)",value=0.25)   
+                    alpha = gr.Slider(minimum=-1,step=0.01,maximum=2,label="slider_a",value=0.5,elem_classes=['main_sliders'])
+                    beta = gr.Slider(minimum=-1,step=0.01,maximum=2,label="slider_b",value=0.5,elem_classes=['main_sliders'],interactive=False)
+                    gamma = gr.Slider(minimum=0,step=0.01,maximum=2,label="slider_c",value=0.25,elem_classes=['main_sliders'],interactive=False)   
+
+                mode_selector.change(fn=calcmode_changed, inputs=[mode_selector,alpha,beta,gamma], outputs=[mode_selector,alpha,beta,gamma],show_progress='hidden')
 
                 with gr.Row():
                     with gr.Column(variant='panel'):
@@ -344,7 +345,7 @@ def save_loaded_model(name,settings):
     shared.sd_model_file = checkpoint_info.filename
     return 'Model saved as: '+checkpoint_info.filename
 
-    
+
 def save_state_dict(state_dict,name,settings,timer=None):
     fileext = ".fp16.safetensors" if 'fp16' in settings else '.safetensors'
 
@@ -395,6 +396,38 @@ def checkpoint_changed(name):
         return plaintext_to_html('None | None',classname='untitled_sd_version')
     sdversion, dtype = misc_util.id_checkpoint(name)
     return plaintext_to_html(f"{sdversion} | {str(dtype).split('.')[1]}",classname='untitled_sd_version')
+
+
+def calcmode_changed(calcmode_name, alpha, beta, gamma):
+    calcmode = calcmode_selection[calcmode_name]
+    state = [False]*3 + [True] * calcmode.input_sliders
+
+    slider_a_update = gr.update(
+        minimum=calcmode.slid_a_config[0],
+        maximum=calcmode.slid_a_config[1],
+        step=calcmode.slid_a_config[2],
+        info=calcmode.slid_a_info,
+        interactive = state.pop()
+    )
+
+    slider_b_update = gr.update(
+        minimum=calcmode.slid_b_config[0],
+        maximum=calcmode.slid_b_config[1],
+        step=calcmode.slid_b_config[2],
+        info=calcmode.slid_b_info,
+        interactive = state.pop()
+    )
+
+    slider_c_update = gr.update(
+        minimum=calcmode.slid_c_config[0],
+        maximum=calcmode.slid_c_config[1],
+        step=calcmode.slid_c_config[2],
+        info=calcmode.slid_c_info,
+        interactive = state.pop()
+    )
+
+    return gr.update(info = calcmode.description),slider_a_update,slider_b_update,slider_c_update
+
 
 
 class NoHashing:

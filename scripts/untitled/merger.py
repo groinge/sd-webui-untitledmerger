@@ -118,7 +118,7 @@ def initialize_merge(task) -> tuple:
     except SafetensorError: #Fallback in case one of the secondary models lack a key present in the primary model
         tensor = cmn.loaded_checkpoints[cmn.primary].get_tensor(task.key)
 
-    tensor = tensor.detach().cpu()
+    #tensor = tensor.detach().cpu()
     devices.torch_gc()
     #torch.cuda.empty_cache()
     return (task.key, tensor)
