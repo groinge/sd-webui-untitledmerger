@@ -34,7 +34,6 @@ calcmode_selection = {}
 for calcmode in calcmodes.CALCMODES_LIST:
     calcmode_selection.update({calcmode.name: calcmode})
 
-
 def on_ui_tabs():
     with gr.Blocks() as ui:
         with ui_components.ResizeHandleRow():
@@ -108,7 +107,7 @@ def on_ui_tabs():
 
                
                 #Block sliders
-                                    
+                """   
                 def createslider(name):
                     slider = gr.Slider(label=name,minimum=0,maximum=1,value=0.5,interactive=False,scale=5,min_width=120)
 
@@ -170,9 +169,9 @@ def on_ui_tabs():
                         disable_all = gr.Button(value="Disable all")
 
                         enable_all.click(fn=lambda x: gr.update(value = list(sliders.keys())),outputs=slidertoggles)
-                        disable_all.click(fn=lambda: gr.update(value = []),outputs=slidertoggles)
-                with gr.Accordion(label='Recipe editor',open=True):
-                    recipe_editor = gr.Code(value=EXAMPLE,lines=20,language='yaml',label='yaml')
+                        disable_all.click(fn=lambda: gr.update(value = []),outputs=slidertoggles)"""
+                with gr.Accordion(label='Weight editor',open=True):
+                    weight_editor = gr.Code(value=EXAMPLE,lines=20,language='yaml',label='')
 
 
             with gr.Column():
@@ -186,7 +185,7 @@ def on_ui_tabs():
 
 
             empty_cache_button.click(fn=merger.clear_cache,outputs=status)
-            merge_button.click(fn=start_merge, inputs=[mode_selector,model_a,model_b,model_c,alpha,beta,gamma,recipe_editor,save_name,save_settings,discard,clude,clude_mode],outputs=status)
+            merge_button.click(fn=start_merge, inputs=[mode_selector,model_a,model_b,model_c,alpha,beta,gamma,weight_editor,save_name,save_settings,discard,clude,clude_mode],outputs=status)
 
         
 
@@ -194,11 +193,30 @@ def on_ui_tabs():
 
 script_callbacks.on_ui_tabs(on_ui_tabs)
 
+WEIGHT_NAMES = ('alpha','beta','gamma')
 
 def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,editor,save_name,save_settings,discard,clude,clude_mode):
     calcmode = calcmode_selection[calcmode]
     timer = Timer()
     cmn.stop = False
+
+    targets = re.sub(r'#.*$','',editor.lower(),flags=re.M)
+    targets = re.sub(r'\bslider_a\b',str(slider_a),targets,flags=re.M)
+    targets = re.sub(r'\bslider_b\b',str(slider_b),targets,flags=re.M)
+    targets = re.sub(r'\bslider_c\b',str(slider_c),targets,flags=re.M)
+
+    targets_list = targets.split('\n')
+    parsed_targets = {}
+    for target in targets_list:
+        if target != "":
+            target = re.sub(r'\s+','',target)
+            selector, weights = target.split(':')
+            parsed_targets[selector] = {}
+            for n,weight in enumerate(weights.split(',')):
+                try:
+                    parsed_targets[selector][WEIGHT_NAMES[n]] = float(weight)
+                except ValueError:pass
+
 
     checkpoints = []
     for n, model in enumerate((model_a,model_b,model_c)):
@@ -215,7 +233,8 @@ def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,edit
     else:
         assert n+1 >= calcmode.input_models, "Missing input models"
 
-    discard_targets = re.findall(r'[^\s]+', discard, flags=re.I|re.M)
+
+    discards = re.findall(r'[^\s]+', discard, flags=re.I|re.M)
     cludes = [clude_mode.lower(),*re.findall(r'[^\s]+', clude, flags=re.I|re.M)]
 
     sd_models.unload_model_weights(shared.sd_model)
@@ -224,8 +243,7 @@ def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,edit
     devices.torch_gc()
 
     #Actual main merge process begins here:
-    targets = ["all"]
-    state_dict = merger.prepare_merge(calcmode,targets,checkpoints,slider_a,slider_b,slider_c,discard_targets,cludes,timer)
+    state_dict = merger.prepare_merge(calcmode,parsed_targets,checkpoints,discards,cludes,timer)
 
     merge_name = create_name(checkpoints,calcmode.name,slider_a)
 
@@ -249,8 +267,6 @@ def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,edit
     print(message)
     return message
 
-
-    
 
 def load_merged_state_dict(state_dict,checkpoint_info):
     config = sd_models_config.find_checkpoint_config(state_dict, checkpoint_info)

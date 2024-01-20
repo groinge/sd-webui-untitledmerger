@@ -18,7 +18,7 @@ class CalcMode:
     slid_c_info = ''
     slid_c_config = (-1, 2, 0.01)
 
-    def create_recipe(self, key, model_a, model_b, model_c, alpha, beta, gamma) -> opr.Operation:
+    def create_recipe(self, key, model_a, model_b, model_c, alpha=0, beta=0, gamma=0) -> opr.Operation:
         pass
 
 
@@ -30,7 +30,7 @@ class WeightSum(CalcMode):
     slid_a_info = "model_a | model_b"
     slid_a_config = (0, 1, 0.01)
 
-    def create_recipe(key, model_a, model_b, model_c, alpha, beta, gamma):
+    def create_recipe(key, model_a, model_b, model_c, alpha=0, beta=0, gamma=0):
         #This is used when constructing the recipe for the merge, tensors are not handled here.
         a = opr.LoadTensor(key,model_a)
         b = opr.LoadTensor(key,model_b)
@@ -52,7 +52,7 @@ class AddDifference(CalcMode):
     slid_a_info = "alpha"
     slid_a_config = (-1, 2, 0.01)
 
-    def create_recipe(key, model_a, model_b, model_c, alpha, beta, gamma):
+    def create_recipe(key, model_a, model_b, model_c, alpha=0, beta=0, gamma=0):
         a = opr.LoadTensor(key,model_a)
         b = opr.LoadTensor(key,model_b)
         c = opr.LoadTensor(key,model_c)
@@ -74,7 +74,7 @@ class SmoothAdd(CalcMode):
     slid_a_info = "alpha"
     slid_a_config = (-1, 4, 0.01)
 
-    def create_recipe(key, model_a, model_b, model_c, alpha, beta, gamma):
+    def create_recipe(key, model_a, model_b, model_c, alpha=0, beta=0, gamma=0):
         a = opr.LoadTensor(key,model_a)
         b = opr.LoadTensor(key,model_b)
         c = opr.LoadTensor(key,model_c)

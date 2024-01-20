@@ -1,7 +1,7 @@
 from safetensors.torch import safe_open
 from safetensors import SafetensorError
 from concurrent.futures import ThreadPoolExecutor
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 import scripts.untitled.operators as oper
 import scripts.untitled.misc_util as mutil
 import scripts.common as cmn
@@ -61,13 +61,13 @@ def tensor_size(t: torch.Tensor) -> int:
 cmn.tensor_cache = tCache(cmn.cache_size)
 
 
-def prepare_merge(calcmode,targets,checkpoints,slider_a,slider_b,slider_c,discard_targets,cludes,timer) -> dict:
+def prepare_merge(calcmode,targets,checkpoints,discard_targets,cludes,timer) -> dict:
     cmn.primary = checkpoints[0]
     
     with safe_open_multiple(checkpoints,device=cmn.device) as cmn.loaded_checkpoints:
         state_dict_keys = cmn.loaded_checkpoints[cmn.primary].keys()
 
-        tasks = parse_recipe(calcmode,targets,state_dict_keys,cmn.primary,discard_targets,cludes,checkpoints,slider_a,slider_b,slider_c,)
+        tasks = parse_recipe(calcmode,targets,state_dict_keys,cmn.primary,discard_targets,cludes,checkpoints)
         tasks_copy = copy(tasks)
 
         state_dict = {}
@@ -95,80 +95,61 @@ def prepare_merge(calcmode,targets,checkpoints,slider_a,slider_b,slider_c,discar
     return state_dict
 
 
-def parse_recipe(calcmode,targets,keys,primary,discard,clude,checkpoints,slider_a,slider_b,slider_c) -> list:
+def parse_recipe(calcmode,targets,keys,primary,discard,clude,checkpoints) -> list:
     cludemode = clude.pop(0)
     tasks = []
 
-    discard_keys,keys = assign_keys_to_targets(discard,keys)
-    include_keys,exclude_keys = assign_keys_to_targets(clude,keys)
-    assigned_keys,_ = assign_keys_to_targets(targets,include_keys if cludemode == 'include' else exclude_keys)
+    assigned_keys = assign_weights_to_keys(targets,keys)
 
     for key in keys:
-        if key in discard_keys:continue
-        elif key in SKIP_KEYS or 'model_ema' in key:
+        #if key in discard_keys:continue
+        if key in SKIP_KEYS or 'model_ema' in key:
             tasks.append(oper.LoadTensor(key,primary))
         elif key in assigned_keys.keys():
-            tasks.append(calcmode.create_recipe(key,*checkpoints,slider_a,slider_b,slider_c))
+            tasks.append(calcmode.create_recipe(key,*checkpoints,**assigned_keys[key]))
         else: 
             tasks.append(oper.LoadTensor(key,primary))
     return tasks
 
 
-def initialize_merge(taskinfo) -> tuple:
+def initialize_merge(task) -> tuple:
     try:
-        tensor = taskinfo.merge()
+        tensor = task.merge()
     except SafetensorError: #Fallback in case one of the secondary models lack a key present in the primary model
-        tensor = cmn.loaded_checkpoints[cmn.primary].get_tensor(taskinfo.key)
+        tensor = cmn.loaded_checkpoints[cmn.primary].get_tensor(task.key)
 
-    if cmn.low_vram:
-        tensor = tensor.detach().cpu()
+    tensor = tensor.detach().cpu()
     devices.torch_gc()
     #torch.cuda.empty_cache()
-    return (taskinfo.key, tensor)
+    return (task.key, tensor)
 
 
-BASE_SELECTORS_PRIORITY = {
-    "all":  0,
-    "clip": 1,
-    "base": 1,
-    "unet": 1,
-    "in":   2,
-    "out":  2,
-    "mid":  2
-}
-def assign_keys_to_targets(targets,keys) -> dict:
-    target_assigners = []
+def assign_weights_to_keys(targets,keys) -> dict:
+    weight_assigners = []
     keystext = "\n".join(keys)+"\n"
 
-    for target_name in targets:
-        target = re.split("\.|:",target_name.lower())
-
-        priority = 0
-        if target[0] in mutil.BASE_SELECTORS:
-            priority += BASE_SELECTORS_PRIORITY[target.pop(0)]
-            
-        priority += len(target)
-
+    for target_name,weights in targets.items():
         regex = mutil.target_to_regex(target_name)
 
-        target_assigners.append((priority,target_name,regex))
+        weight_assigners.append((weights, regex))
     
-    #Sorts the selectors according to the priority of the base selector + the number of segments in the target. 
-    #This is to give more specific targets priority when assigning keys, unfortunately this system is kinda imperfect
-    target_assigners.sort(key=lambda x:x[0],reverse=True)
-    
-    assigned_keys = dict()
+    keys_n_weights = list()
 
-    for _, target, regex in target_assigners:
+    for weights, regex in weight_assigners:
         target_keys = re.findall(regex,keystext,re.M)
-        target_dict = dict.fromkeys(target_keys,target)
+        keys_n_weights.append((target_keys,weights))
+    
+    keys_n_weights.sort(key=lambda x: len(x[0]))
+    keys_n_weights.reverse()
 
-        for key in target_keys:
-            keystext = keystext.replace(key+"\n","")
+    assigned_keys = defaultdict()
+    assigned_keys.default_factory = dict
+    
+    for keys, weights in keys_n_weights:
+        for key in keys:
+            assigned_keys[key].update(weights)
 
-        assigned_keys.update(target_dict)
-    remaining_keys = [x for x in keystext.split('\n') if x]
-    return assigned_keys, remaining_keys
+    return assigned_keys
 
 
 def get_tensors_from_loaded_model(state_dict,tasks) -> dict:
@@ -206,14 +187,6 @@ class safe_open_multiple(object):
         for file in self.open_files.values():
             file.__exit__(*args)
 
-
-#Basic inheritence from all to targets that only input a single number
-def apply_inheritance(recipe):
-    for target, params in recipe.items():
-        if not isinstance(params,dict):
-            recipe[target] = deepcopy(recipe['all'])
-            list(recipe[target].values())[0]['alpha'] = params
-    return recipe
 
 def clear_cache():
     cmn.tensor_cache.__init__(cmn.cache_size)

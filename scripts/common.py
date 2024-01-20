@@ -10,10 +10,7 @@ precision = float16
 cache_size = 1024*1024*1024*4
 tensor_cache = None
 
-#moves finished tensors to CPU during merge to save video memory (slower)
-low_vram = True
-
-#Removes loaded model from memory at the start of the merge, requiring a new one to be initialized before loading the merge
+#Removes loaded model from memory at the start of the merge, requiring a new one to be initialized before loading
 trash_model = False
 
 stop = False
