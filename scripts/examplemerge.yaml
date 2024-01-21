@@ -1,4 +1,4 @@
-all: slider_a, slider_b, slider_c
+all: slider_a, slider_b, slider_c, slider_d
 #in.7.layers: 1
 #out.3-7: 0.5
 #out.5,8,9: 2

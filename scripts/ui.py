@@ -59,17 +59,19 @@ def on_ui_tabs():
                     with gr.Column(variant='compact',min_width=150,scale=slider_scale):
                         with gr.Row():
                             model_c = gr.Dropdown(checkpoints_no_pickles(), label="model_c",scale=slider_scale)
-                            refresh_button = create_refresh_button([model_a,model_b,model_c], sd_models.list_models,lambda: {"choices": checkpoints_no_pickles()},"refresh_checkpoints")
-                            refresh_button.update(scale=1,min_width=50)
+                            refresh_button = gr.Button(value='🔄', elem_classes=["tool"],scale=1)
                         model_c_info = gr.HTML(plaintext_to_html('None | None',classname='untitled_sd_version'))
                         model_c.change(fn=checkpoint_changed,inputs=model_c,outputs=model_c_info)
 
                     def swapvalues(x,y): return gr.update(value=y), gr.update(value=x)
                     swap_models_AB.click(fn=swapvalues,inputs=[model_a,model_b],outputs=[model_a,model_b])
                     swap_models_BC.click(fn=swapvalues,inputs=[model_b,model_c],outputs=[model_b,model_c])
+                    refresh_button.click(fn=refresh_models,outputs=[model_a,model_b,model_c])
 
                 #### MODE SELECTION
-                mode_selector = gr.Radio(label='Merge mode:',choices=list(calcmode_selection.keys()),value=list(calcmode_selection.keys())[0])
+                with gr.Row():
+                    mode_selector = gr.Radio(label='Merge mode:',choices=list(calcmode_selection.keys()),value=list(calcmode_selection.keys())[0],scale=3)
+                    smooth = gr.Checkbox(label='Smooth Add',info='Filter additions to prevent burning at high weights',show_label=True,scale=1)
                 
                 ##### MAIN SLIDERS
                 with gr.Row():
@@ -78,7 +80,7 @@ def on_ui_tabs():
                     gamma = gr.Slider(minimum=-1,step=0.01,maximum=2,label="slider_c",info='-',value=0.25,elem_classes=['main_sliders'])
                     delta = gr.Slider(minimum=-1,step=0.01,maximum=2,label="slider_d",info='-',value=0.25,elem_classes=['main_sliders'])
 
-                mode_selector.change(fn=calcmode_changed, inputs=[mode_selector,alpha,beta,gamma], outputs=[mode_selector,alpha,beta,gamma],show_progress='hidden')
+                mode_selector.change(fn=calcmode_changed, inputs=[mode_selector], outputs=[mode_selector,alpha,beta,gamma,delta],show_progress='hidden')
 
                 with gr.Row():
                     with gr.Column(variant='panel'):
@@ -86,7 +88,7 @@ def on_ui_tabs():
                         with gr.Row():
                             save_settings = gr.CheckboxGroup(label = " ",choices=["Autosave","Overwrite","fp16"],value=['fp16'],interactive=True,scale=2,min_width=100)
                             save_loaded = gr.Button(value='Save loaded checkpoint',size='sm',scale=1)
-                            save_loaded.click(fn=save_loaded_model, inputs=[save_name,save_settings],outputs=status)
+                            save_loaded.click(fn=save_loaded_model, inputs=[save_name,save_settings],outputs=status).then(fn=refresh_models,outputs=[model_a,model_b,model_c])
 
                     with gr.Column():
                         #### MERGE BUTTONS
@@ -112,8 +114,6 @@ def on_ui_tabs():
                
                 #with gr.Accordion(label='Weight editor',open=True):
                     
-
-
             with gr.Column():
                 status.render()
                 weight_editor = gr.Code(value=EXAMPLE,lines=20,language='yaml',label='')
@@ -126,7 +126,7 @@ def on_ui_tabs():
 
 
             empty_cache_button.click(fn=merger.clear_cache,outputs=status)
-            merge_button.click(fn=start_merge, inputs=[mode_selector,model_a,model_b,model_c,alpha,beta,gamma,delta,weight_editor,save_name,save_settings,discard,clude,clude_mode],outputs=status)
+            merge_button.click(fn=start_merge, inputs=[mode_selector,model_a,model_b,model_c,alpha,beta,gamma,delta,weight_editor,save_name,save_settings,discard,clude,clude_mode,smooth],outputs=status)
 
         
 
@@ -134,9 +134,9 @@ def on_ui_tabs():
 
 script_callbacks.on_ui_tabs(on_ui_tabs)
 
-WEIGHT_NAMES = ('alpha','beta','gamma')
+WEIGHT_NAMES = ('alpha','beta','gamma','delta')
 
-def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,slider_d,editor,save_name,save_settings,discard,clude,clude_mode):
+def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,slider_d,editor,save_name,save_settings,discard,clude,clude_mode,smooth):
     calcmode = calcmode_selection[calcmode]
     timer = Timer()
     cmn.stop = False
@@ -153,7 +153,7 @@ def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,slid
         if target != "":
             target = re.sub(r'\s+','',target)
             selector, weights = target.split(':')
-            parsed_targets[selector] = {}
+            parsed_targets[selector] = {'smooth':smooth}
             for n,weight in enumerate(weights.split(',')):
                 try:
                     parsed_targets[selector][WEIGHT_NAMES[n]] = float(weight)
@@ -167,8 +167,7 @@ def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,slid
             continue
         name = model.split(' ')[0]
         checkpoint_info = sd_models.get_closet_checkpoint_match(name)
-
-        assert checkpoint_info != None, 'Couldn\'t find checkpoint: '+name
+        assert checkpoint_info != None, 'Couldn\'t find checkpoint. '+name
         assert checkpoint_info.filename.endswith('.safetensors'), 'This extension only supports safetensors checkpoints: '+name
         
         checkpoints.append(checkpoint_info.filename)
@@ -339,9 +338,8 @@ def checkpoint_changed(name):
     return plaintext_to_html(f"{sdversion} | {str(dtype).split('.')[1]}",classname='untitled_sd_version')
 
 
-def calcmode_changed(calcmode_name, alpha, beta, gamma):
+def calcmode_changed(calcmode_name):
     calcmode = calcmode_selection[calcmode_name]
-    state = [False]*3 + [True] * calcmode.input_sliders
 
     slider_a_update = gr.update(
         minimum=calcmode.slid_a_config[0],
@@ -364,7 +362,14 @@ def calcmode_changed(calcmode_name, alpha, beta, gamma):
         info=calcmode.slid_c_info
     )
 
-    return gr.update(info = calcmode.description),slider_a_update,slider_b_update,slider_c_update
+    slider_d_update = gr.update(
+        minimum=calcmode.slid_d_config[0],
+        maximum=calcmode.slid_d_config[1],
+        step=calcmode.slid_d_config[2],
+        info=calcmode.slid_d_info
+    )
+
+    return gr.update(info = calcmode.description),slider_a_update,slider_b_update,slider_c_update,slider_d_update
 
 
 class NoHashing:
@@ -376,3 +381,9 @@ class NoHashing:
 
     def __exit__(self,*args):
         shared.cmd_opts.no_hashing = self.orig_setting
+
+
+def refresh_models():
+    sd_models.list_models()
+    checkpoints_list = checkpoints_no_pickles()
+    return gr.update(choices=checkpoints_list),gr.update(choices=checkpoints_list),gr.update(choices=checkpoints_list)

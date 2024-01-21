@@ -102,8 +102,8 @@ class Smooth(Operation):
         filtered_diff = scipy.ndimage.median_filter(a.detach().cpu().to(torch.float32).numpy(), size=3)
         # Apply Gaussian filter to the filtered differences
         filtered_diff = scipy.ndimage.gaussian_filter(filtered_diff, sigma=1)
-        return torch.tensor(filtered_diff,dtype=cmn.precision,device=cmn.device)    
-
+        return torch.tensor(filtered_diff,dtype=cmn.precision,device=cmn.device)
+    
 
 class TrainDiff(Operation):
     def __init__(self,*args):
@@ -129,7 +129,7 @@ class TrainDiff(Operation):
         return new_diff.to(cmn.precision)  *1.8
         
 
-class Extract(Operation):
+class ExtractRelative(Operation):
     def __init__(self,key,alpha,beta,gamma,*args):
         super().__init__(key,*args)
         self.alpha = alpha
@@ -148,14 +148,20 @@ class Extract(Operation):
         a = a.float() - base
         b = b.float() - base
         c = torch.cosine_similarity(a, b, -1).clamp(-1, 1).unsqueeze(-1)
-        d = ((c + 1) / 2) ** (self.gamma * 25)
+        d = ((c + 1) / 2) ** self.gamma
         result = torch.lerp(a, b, self.alpha) * torch.lerp(d, 1 - d, self.beta)
         return result.to(dtype)
     
 
+class Extract(ExtractRelative):
+    def __init__(self,*args):
+        super().__init__(*args)
 
-#Items are added at the end of the dict and removed at the beginning 
-#High overhead, so is only worth using for computationally demanding operations
+    def oper(self, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+        return super().oper(None,a,b)
+
+
+#High overhead, is only worth using for computationally demanding operations
 class Cache:
     def __init__(self,size):
         self.cache = OrderedDict()
