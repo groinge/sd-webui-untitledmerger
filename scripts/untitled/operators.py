@@ -1,8 +1,11 @@
 import torch,scipy
 import scripts.common as cmn
 from copy import deepcopy
+from collections import OrderedDict
 
 
+
+#Wrappers
 
 def recurse(operation):
     source_tensors = []
@@ -23,6 +26,8 @@ def cache_operation(func):
         cmn.tensor_cache.append(operation,result)
         return result
     return inner
+
+
 
 ###OPERATORS####
 
@@ -146,3 +151,35 @@ class Extract(Operation):
         d = ((c + 1) / 2) ** (self.gamma * 25)
         result = torch.lerp(a, b, self.alpha) * torch.lerp(d, 1 - d, self.beta)
         return result.to(dtype)
+    
+
+
+#Items are added at the end of the dict and removed at the beginning 
+#High overhead, so is only worth using for computationally demanding operations
+class Cache:
+    def __init__(self,size):
+        self.cache = OrderedDict()
+        self.size = size
+        self.footprint = 0
+
+    def append(self,key, tensor):
+        if key in self.cache:
+            self.cache.move_to_end(key)
+        else:
+            tensor = tensor.detach().cpu()
+            self.cache.update({key:tensor})
+            self.footprint += tensor_size(tensor)
+            self.clear()
+
+    def retrieve(self,key):
+        tensor = self.cache[key]
+        self.cache.move_to_end(key)
+        return tensor.detach().clone().to(cmn.device).type(cmn.precision)
+
+    def clear(self):
+        while self.footprint > self.size:
+            tensor = self.cache.popitem(last=False)[1]
+            self.footprint -= tensor_size(tensor)
+
+def tensor_size(t: torch.Tensor) -> int:
+    return t.element_size() * t.nelement()

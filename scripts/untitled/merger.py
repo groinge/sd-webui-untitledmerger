@@ -1,7 +1,7 @@
 from safetensors.torch import safe_open
 from safetensors import SafetensorError
 from concurrent.futures import ThreadPoolExecutor
-from collections import OrderedDict, defaultdict
+from collections import defaultdict
 import scripts.untitled.operators as oper
 import scripts.untitled.misc_util as mutil
 import scripts.common as cmn
@@ -27,39 +27,7 @@ SKIP_KEYS = [
     "sqrt_recipm1_alphas_cumprod"
 ]
 
-
-#Items are added at the end of the dict and removed at the beginning 
-#High overhead, so is only worth using for computationally demanding operations
-class tCache:
-    def __init__(self,size):
-        self.cache = OrderedDict()
-        self.size = size
-        self.footprint = 0
-
-    def append(self,key, tensor):
-        if key in self.cache:
-            self.cache.move_to_end(key)
-        else:
-            tensor = tensor.detach().cpu()
-            self.cache.update({key:tensor})
-            self.footprint += tensor_size(tensor)
-            self.clear()
-
-    def retrieve(self,key):
-        tensor = self.cache[key]
-        self.cache.move_to_end(key)
-        return tensor.detach().clone().to(cmn.device).type(cmn.precision)
-
-    def clear(self):
-        while self.footprint > self.size:
-            tensor = self.cache.popitem(last=False)[1]
-            self.footprint -= tensor_size(tensor)
-
-def tensor_size(t: torch.Tensor) -> int:
-    return t.element_size() * t.nelement()
-
-cmn.tensor_cache = tCache(cmn.cache_size)
-
+cmn.tensor_cache = oper.Cache(cmn.cache_size)
 
 def prepare_merge(calcmode,targets,checkpoints,discard_targets,cludes,timer) -> dict:
     cmn.primary = checkpoints[0]
@@ -98,12 +66,22 @@ def prepare_merge(calcmode,targets,checkpoints,discard_targets,cludes,timer) -> 
 def parse_recipe(calcmode,targets,keys,primary,discard,clude,checkpoints) -> list:
     cludemode = clude.pop(0)
     tasks = []
+    discard_regex = re.compile(mutil.target_to_regex(discard))
+    discard_keys = list(filter(lambda x: re.search(discard_regex,x),keys))
 
-    assigned_keys = assign_weights_to_keys(targets,keys)
+    desired_keys = keys
+    if clude:
+        clude_regex = re.compile(mutil.target_to_regex(clude))
+        if cludemode == 'exclude':
+            desired_keys = list(filter(lambda x: not re.search(clude_regex,x),keys))
+        else:
+            desired_keys = list(filter(lambda x: re.search(clude_regex,x),keys))
+
+    assigned_keys = assign_weights_to_keys(targets,desired_keys)
 
     for key in keys:
-        #if key in discard_keys:continue
-        if key in SKIP_KEYS or 'model_ema' in key:
+        if key in discard_keys:continue
+        elif key in SKIP_KEYS or 'model_ema' in key:
             tasks.append(oper.LoadTensor(key,primary))
         elif key in assigned_keys.keys():
             tasks.append(calcmode.create_recipe(key,*checkpoints,**assigned_keys[key]))
@@ -126,7 +104,7 @@ def initialize_merge(task) -> tuple:
 
 def assign_weights_to_keys(targets,keys) -> dict:
     weight_assigners = []
-    keystext = "\n".join(keys)+"\n"
+    keystext = "\n".join(keys)
 
     for target_name,weights in targets.items():
         regex = mutil.target_to_regex(target_name)

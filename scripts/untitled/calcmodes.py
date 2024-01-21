@@ -9,13 +9,13 @@ class CalcMode:
     input_models = 3
     input_sliders = 3
 
-    slid_a_info = 'alpha'
+    slid_a_info = '-'
     slid_a_config = (-1, 2, 0.01) #minimum,maximum,step
 
-    slid_b_info = 'beta'
+    slid_b_info = '-'
     slid_b_config = (-1, 2, 0.01)
 
-    slid_c_info = 'gamma'
+    slid_c_info = '-'
     slid_c_config = (-1, 2, 0.01)
 
     def create_recipe(self, key, model_a, model_b, model_c, alpha=0, beta=0, gamma=0) -> opr.Operation:
@@ -35,8 +35,13 @@ class WeightSum(CalcMode):
         a = opr.LoadTensor(key,model_a)
         b = opr.LoadTensor(key,model_b)
 
+        if alpha >= 1:
+            return b
+        elif alpha <= 0:
+            return a
+
         c = opr.Multiply(key, 1-alpha, a)
-        d = opr.Multiply(key, alpha, b).cache()
+        d = opr.Multiply(key, alpha, b)
         
         res = opr.Add(key, c, d)
         return res
@@ -120,18 +125,18 @@ class Extract(CalcMode):
     slid_a_info = 'model_b - model_c'
     slid_a_config = (0, 1, 0.01)
 
-    slid_b_info = 'extract similarity - extract dissimilarity'
+    slid_b_info = 'similarity - dissimilarity'
     slid_b_config = (0, 1, 0.01)
 
     slid_c_info = 'narrow disimilarity - narrow similarity'
-    slid_c_config = (0, 50, 0.01)
+    slid_c_config = (0, 2, 0.01)
 
     def create_recipe(key, model_a, model_b, model_c, alpha=0, beta=0, gamma=0):
         a = opr.LoadTensor(key,model_a)
         b = opr.LoadTensor(key,model_b)
         c = opr.LoadTensor(key,model_c)
 
-        extracted = opr.Extract(key, alpha, beta, gamma, a, b, c)
+        extracted = opr.Extract(key, alpha, beta, gamma*15, a, b, c)
 
         res = opr.Add(key, a, extracted)
         return res

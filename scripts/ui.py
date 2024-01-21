@@ -73,9 +73,10 @@ def on_ui_tabs():
                 
                 ##### MAIN SLIDERS
                 with gr.Row():
-                    alpha = gr.Slider(minimum=-1,step=0.01,maximum=2,label="slider_a",value=0.5,elem_classes=['main_sliders'])
-                    beta = gr.Slider(minimum=-1,step=0.01,maximum=2,label="slider_b",value=0.5,elem_classes=['main_sliders'],interactive=False)
-                    gamma = gr.Slider(minimum=0,step=0.01,maximum=2,label="slider_c",value=0.25,elem_classes=['main_sliders'],interactive=False)   
+                    alpha = gr.Slider(minimum=-1,step=0.01,maximum=2,label="slider_a",info='model_a - model_b',value=0.5,elem_classes=['main_sliders'])
+                    beta = gr.Slider(minimum=-1,step=0.01,maximum=2,label="slider_b",info='-',value=0.5,elem_classes=['main_sliders'])
+                    gamma = gr.Slider(minimum=-1,step=0.01,maximum=2,label="slider_c",info='-',value=0.25,elem_classes=['main_sliders'])
+                    delta = gr.Slider(minimum=-1,step=0.01,maximum=2,label="slider_d",info='-',value=0.25,elem_classes=['main_sliders'])
 
                 mode_selector.change(fn=calcmode_changed, inputs=[mode_selector,alpha,beta,gamma], outputs=[mode_selector,alpha,beta,gamma],show_progress='hidden')
 
@@ -93,90 +94,29 @@ def on_ui_tabs():
                         with gr.Row():
                             empty_cache_button = gr.Button(value='Empty Cache')
                             #stop_button = gr.Button(value='Stop merge')
-                with gr.Row():
-                    clude = gr.Textbox(max_lines=1,label='Include/Exclude:',info='Entered targets will remain as model_a when set to \'Exclude\', and will be the only ones to be merged if set to \'Include\'. Separate with withspace.',value='',lines=1,scale=4)
-                    clude_mode = gr.Radio(label="",info="",choices=["Exclude",("Include exclusively",'include')],value='Exclude',min_width=300,scale=1)
-                discard = gr.Textbox(max_lines=1,label='Discard:',info="Targets will be removed from the model, separate with whitespace.",value='model_ema',lines=1,scale=2)
+                with gr.Accordion(label='Include/Exclude/Discard',open=False):
+                    with gr.Row():
+                        with gr.Column():
+                            clude = gr.Textbox(max_lines=4,label='Include/Exclude:',info='Entered targets will remain as model_a when set to \'Exclude\', and will be the only ones to be merged if set to \'Include\'. Separate with withspace.',value='',lines=4,scale=4)
+                            clude_mode = gr.Radio(label="",info="",choices=["Exclude",("Include exclusively",'include')],value='Exclude',min_width=300,scale=1)
+                        discard = gr.Textbox(max_lines=5,label='Discard:',info="Targets will be removed from the model, separate with whitespace.",value='model_ema',lines=5,scale=1)
                     
 
                 with gr.Row(variant='panel'):
-                    device_selector = gr.Radio(label='Preferred device/dtype for merging:',info='',choices=['cuda/float16', 'cuda/float32', 'cpu/float16', 'cpu/float32'],value = 'cuda/float16' )
+                    device_selector = gr.Radio(label='Preferred device/dtype for merging:',info='',choices=['cuda/float16', 'cuda/float32', 'cpu/float32'],value = 'cuda/float16' )
                     worker_count = gr.Slider(step=2,minimum=2,value=cmn.threads,maximum=16,label='Worker thread count:',info=('Relevant for both cuda and CPU merging. Using too many threads can harm performance.'))
                     def worker_count_fn(x): cmn.threads = int(x)
                     worker_count.release(fn=worker_count_fn,inputs=worker_count)
                     device_selector.change(fn=change_preferred_device,inputs=device_selector)
 
                
-                #Block sliders
-                """   
-                def createslider(name):
-                    slider = gr.Slider(label=name,minimum=0,maximum=1,value=0.5,interactive=False,scale=5,min_width=120)
-
-                    def updateslidervalue(slider):
-                        cmn.slidervalues[name] = slider
-
-                    slider.release(fn=updateslidervalue,inputs=slider)
-                    cmn.slidervalues[name] = None
-                    return slider
-
-                def createblocksliders(side):
-                    created_sliders = {}
-                    for block_numb in range(0,12):
-                        name = side+str(block_numb)
-                        created_sliders[name] = createslider(name)
-                    return created_sliders
-                        
-                sliders = {}
-
-                with gr.Accordion(label='Block Weight Sliders',open=False):
-                    with gr.Row():
-                        gr.Column(scale=4,min_width=0)
-                        sliders['clip'] = createslider('clip')
-                        gr.Column(scale=4,min_width=0)
-                    with gr.Row():
-                        gr.Column(scale=1,min_width=0)
-
-                        with gr.Column(scale=5):
-                            sliders.update(createblocksliders('in.'))
-
-                        gr.Column(scale=1,min_width=0)
-    
-                        with gr.Column(scale=5):
-                            sliders.update(createblocksliders('out.'))
-                                
-                        gr.Column(scale=1,min_width=0)
-                    with gr.Row():
-                        gr.Column(scale=4,min_width=0)
-                        sliders['mid'] = createslider('mid')
-                        gr.Column(scale=4,min_width=0)
-                    with gr.Row():
-                        slidertoggles = gr.CheckboxGroup(choices=list(sliders.keys()))
-
-                        def toggle_slider(inputs):
-                            enabled_sliders = inputs.pop(slidertoggles)
-                            updates = {}
-                            for component,value in inputs.items():
-                                if component.label in enabled_sliders:
-                                    updates[component] = gr.update(interactive=True)
-                                    cmn.slidervalues[component.label] = value
-                                else:
-                                    updates[component] = gr.update(interactive=False)
-                                    cmn.slidervalues[component.label] = None
-                            return updates
-
-                        slidertoggles.change(fn=toggle_slider,inputs={slidertoggles,*list(sliders.values())},outputs={*list(sliders.values())},show_progress='hidden')
-                    with gr.Row():
-                        enable_all = gr.Button(value="Enable all")
-                        disable_all = gr.Button(value="Disable all")
-
-                        enable_all.click(fn=lambda x: gr.update(value = list(sliders.keys())),outputs=slidertoggles)
-                        disable_all.click(fn=lambda: gr.update(value = []),outputs=slidertoggles)"""
-                with gr.Accordion(label='Weight editor',open=True):
-                    weight_editor = gr.Code(value=EXAMPLE,lines=20,language='yaml',label='')
+                #with gr.Accordion(label='Weight editor',open=True):
+                    
 
 
             with gr.Column():
                 status.render()
+                weight_editor = gr.Code(value=EXAMPLE,lines=20,language='yaml',label='')
                 with gr.Tab(label='😫'):
                     result_gallery, html_info_x, html_info, html_log = create_output_panel("txt2img", shared.opts.outdir_txt2img_samples)   
                 with gr.Tab(label='Model keys'):
@@ -186,7 +126,7 @@ def on_ui_tabs():
 
 
             empty_cache_button.click(fn=merger.clear_cache,outputs=status)
-            merge_button.click(fn=start_merge, inputs=[mode_selector,model_a,model_b,model_c,alpha,beta,gamma,weight_editor,save_name,save_settings,discard,clude,clude_mode],outputs=status)
+            merge_button.click(fn=start_merge, inputs=[mode_selector,model_a,model_b,model_c,alpha,beta,gamma,delta,weight_editor,save_name,save_settings,discard,clude,clude_mode],outputs=status)
 
         
 
@@ -196,7 +136,7 @@ script_callbacks.on_ui_tabs(on_ui_tabs)
 
 WEIGHT_NAMES = ('alpha','beta','gamma')
 
-def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,editor,save_name,save_settings,discard,clude,clude_mode):
+def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,slider_d,editor,save_name,save_settings,discard,clude,clude_mode):
     calcmode = calcmode_selection[calcmode]
     timer = Timer()
     cmn.stop = False
@@ -205,6 +145,7 @@ def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,edit
     targets = re.sub(r'\bslider_a\b',str(slider_a),targets,flags=re.M)
     targets = re.sub(r'\bslider_b\b',str(slider_b),targets,flags=re.M)
     targets = re.sub(r'\bslider_c\b',str(slider_c),targets,flags=re.M)
+    targets = re.sub(r'\bslider_d\b',str(slider_d),targets,flags=re.M)
 
     targets_list = targets.split('\n')
     parsed_targets = {}
@@ -406,28 +347,24 @@ def calcmode_changed(calcmode_name, alpha, beta, gamma):
         minimum=calcmode.slid_a_config[0],
         maximum=calcmode.slid_a_config[1],
         step=calcmode.slid_a_config[2],
-        info=calcmode.slid_a_info,
-        interactive = state.pop()
+        info=calcmode.slid_a_info
     )
 
     slider_b_update = gr.update(
         minimum=calcmode.slid_b_config[0],
         maximum=calcmode.slid_b_config[1],
         step=calcmode.slid_b_config[2],
-        info=calcmode.slid_b_info,
-        interactive = state.pop()
+        info=calcmode.slid_b_info
     )
 
     slider_c_update = gr.update(
         minimum=calcmode.slid_c_config[0],
         maximum=calcmode.slid_c_config[1],
         step=calcmode.slid_c_config[2],
-        info=calcmode.slid_c_info,
-        interactive = state.pop()
+        info=calcmode.slid_c_info
     )
 
     return gr.update(info = calcmode.description),slider_a_update,slider_b_update,slider_c_update
-
 
 
 class NoHashing:

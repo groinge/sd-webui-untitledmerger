@@ -1,4 +1,5 @@
 all: slider_a, slider_b, slider_c
 #in.7.layers: 1
 #out.3-7: 0.5
-#clip.4.attn: slider_b
+#out.5,8,9: 2
+#clip.4.attn: slider_d
