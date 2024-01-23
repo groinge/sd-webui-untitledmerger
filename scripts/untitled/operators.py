@@ -1,5 +1,5 @@
 import torch,scipy
-import scripts.common as cmn
+import scripts.untitled.common as cmn
 from copy import deepcopy
 from collections import OrderedDict
 

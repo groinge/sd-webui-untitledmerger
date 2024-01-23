@@ -18,7 +18,3 @@ loaded_checkpoints = None
 primary = ""
 
 last_merge_tasks = tuple()
-
-#Components
-
-slidervalues = {}

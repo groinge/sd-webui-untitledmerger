@@ -77,29 +77,6 @@ class AddDifference(CalcMode):
     
 CALCMODES_LIST.append(AddDifference)
 
-"""
-class SmoothAdd(CalcMode):
-    name = 'Smooth Add'
-    description = 'model_a + (mode_b - model_c) * alpha'
-    input_models = 3
-    input_sliders = 1
-    slid_a_info = "alpha"
-    slid_a_config = (-1, 2, 0.01)
-
-    def create_recipe(key, model_a, model_b, model_c, alpha=0, **kwargs):
-        a = opr.LoadTensor(key,model_a)
-        b = opr.LoadTensor(key,model_b)
-        c = opr.LoadTensor(key,model_c)
-
-        diff = opr.Sub(key, b, c)
-        diffsmooth = opr.Smooth(key,diff).cache()
-        diffm = opr.Multiply(key, alpha*1.5, diffsmooth)
-
-        res = opr.Add(key, a, diffm)
-        return res
-    
-CALCMODES_LIST.append(SmoothAdd)"""
-
 
 class TrainDifference(CalcMode):
     name = 'Train Difference'
@@ -161,29 +138,6 @@ class Extract(CalcMode):
         return res
     
 CALCMODES_LIST.append(Extract)
-
-
-"""class CombineSimilarity(CalcMode):
-    name = 'Combine Similarity'
-    description = 'description'
-    input_models = 2
-    input_sliders = 2
-    
-    slid_a_info = 'model_a - model_b'
-    slid_a_config = (0, 1, 0.01)
-
-    slid_b_info = 'narrow dissimilarity - narrow similarity'
-    slid_b_config = (0, 2, 0.01)
-
-    def create_recipe(key, model_a, model_b, model_c, alpha=0, beta=0, **kwargs):
-        a = opr.LoadTensor(key,model_a)
-        b = opr.LoadTensor(key,model_b)
-
-        res = opr.Extract(key, alpha, 0, beta*15, a, b)
-
-        return res
-
-CALCMODES_LIST.append(CombineSimilarity)"""
         
 
 

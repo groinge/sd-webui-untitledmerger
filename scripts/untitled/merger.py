@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from collections import defaultdict
 import scripts.untitled.operators as oper
 import scripts.untitled.misc_util as mutil
-import scripts.common as cmn
+import scripts.untitled.common as cmn
 import torch,os,re,gc
 from tqdm import tqdm
 from copy import copy,deepcopy

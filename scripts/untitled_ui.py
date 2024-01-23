@@ -5,7 +5,7 @@ from modules import sd_models,script_callbacks,scripts,shared,devices,sd_unet,sd
 from modules.timer import Timer
 from modules.ui_common import create_refresh_button,create_output_panel,plaintext_to_html
 from scripts.untitled import merger,misc_util,calcmodes
-import scripts.common as cmn
+import scripts.untitled.common as cmn
 from copy import deepcopy
 
 networks = script_loading.load_module(os.path.join(paths.extensions_builtin_dir,'Lora','networks.py'))
@@ -18,14 +18,6 @@ ext2abs = lambda *x: os.path.join(extension_path,*x)
 
 symlink_path = ext2abs("scripts","untitled","symlink")
 sd_checkpoints_path = os.path.join(paths.models_path,'Stable-diffusion')
-try:
-    os.symlink(sd_checkpoints_path,symlink_path,target_is_directory=True)
-except FileExistsError:pass
-except OSError:
-    try:
-        import _winapi
-        _winapi.CreateJunction(sd_checkpoints_path,symlink_path)
-    except FileExistsError:pass
         
 with open(ext2abs('scripts','examplemerge.yaml'), 'r') as file:
     EXAMPLE = file.read()
@@ -74,7 +66,7 @@ def on_ui_tabs():
                     smooth = gr.Checkbox(label='Smooth Add',info='Filter additions to prevent burning at high weights',show_label=True,scale=1)
                 
                 ##### MAIN SLIDERS
-                with gr.Row():
+                with gr.Row(equal_height=True):
                     alpha = gr.Slider(minimum=-1,step=0.01,maximum=2,label="slider_a",info='model_a - model_b',value=0.5,elem_classes=['main_sliders'])
                     beta = gr.Slider(minimum=-1,step=0.01,maximum=2,label="slider_b",info='-',value=0.5,elem_classes=['main_sliders'])
                     gamma = gr.Slider(minimum=-1,step=0.01,maximum=2,label="slider_c",info='-',value=0.25,elem_classes=['main_sliders'])
@@ -82,7 +74,7 @@ def on_ui_tabs():
 
                 mode_selector.change(fn=calcmode_changed, inputs=[mode_selector], outputs=[mode_selector,alpha,beta,gamma,delta],show_progress='hidden')
 
-                with gr.Row():
+                with gr.Row(equal_height=True):
                     with gr.Column(variant='panel'):
                         save_name = gr.Textbox(max_lines=1,label='Save checkpoint as:',lines=1,placeholder='Enter name...',scale=2)
                         with gr.Row():
@@ -117,8 +109,8 @@ def on_ui_tabs():
             with gr.Column():
                 status.render()
                 weight_editor = gr.Code(value=EXAMPLE,lines=20,language='yaml',label='')
-                with gr.Tab(label='😫'):
-                    result_gallery, html_info_x, html_info, html_log = create_output_panel("txt2img", shared.opts.outdir_txt2img_samples)   
+                #with gr.Tab(label='😫'):
+                    #result_gallery, html_info_x, html_info, html_log = create_output_panel("txt2img", shared.opts.outdir_txt2img_samples)   
                 with gr.Tab(label='Model keys'):
                     target_tester = gr.Textbox(max_lines=1,label="",info="",interactive=True,placeholder='out.4.tran.norm.weight')
                     target_tester_display = gr.Textbox(max_lines=40,lines=40,label="Targeted keys:",info="",interactive=False)
@@ -191,9 +183,6 @@ def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,slid
     checkpoint_info = deepcopy(sd_models.get_closet_checkpoint_match(model_a))
     checkpoint_info.short_title = hash(cmn.last_merge_tasks)
     checkpoint_info.name_for_extra = '_TEMP_MERGE_'+merge_name
-    checkpoint_info.name = checkpoint_info.name_for_extra + '.safetensors'
-    checkpoint_info.model_name = checkpoint_info.name_for_extra
-    checkpoint_info.ids = [checkpoint_info.model_name, checkpoint_info.name, checkpoint_info.name_for_extra]
 
     if 'Autosave' in save_settings:
         checkpoint_info = save_state_dict(state_dict,save_name or merge_name,save_settings,timer)
@@ -211,15 +200,12 @@ def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,slid
 
 def load_merged_state_dict(state_dict,checkpoint_info):
     config = sd_models_config.find_checkpoint_config(state_dict, checkpoint_info)
-    checkpoint_info.filename = os.path.join(symlink_path, os.path.basename(checkpoint_info.filename))
-    sd_models.checkpoint_aliases[checkpoint_info.name] = checkpoint_info
-    
+
     if shared.sd_model.used_config == config:
         print('Loading weights using already loaded model...')
 
         load_timer = Timer()
-        with NoHashing():
-            sd_models.load_model_weights(shared.sd_model, checkpoint_info, state_dict, load_timer)
+        sd_models.load_model_weights(shared.sd_model, checkpoint_info, state_dict, load_timer)
         print('Loaded weights in: '+load_timer.summary())
 
         sd_hijack.model_hijack.hijack(shared.sd_model)
@@ -229,11 +215,7 @@ def load_merged_state_dict(state_dict,checkpoint_info):
         sd_models.model_data.set_sd_model(shared.sd_model)
         sd_unet.apply_unet()
     else:
-        sd_models.model_data.__init__()
-        with NoHashing():
-            sd_models.load_model(checkpoint_info=checkpoint_info, already_loaded_state_dict=state_dict)
-    shared.opts.sd_model_checkpoint = checkpoint_info.name
-
+        sd_models.load_model(checkpoint_info=checkpoint_info, already_loaded_state_dict=state_dict)
 
 def test_regex(input,model_a):
     regex = misc_util.target_to_regex(input)
@@ -255,7 +237,7 @@ def create_name(checkpoints,calcmode,alpha):
     except:pass
     for filename in checkpoints:
         name = os.path.basename(os.path.splitext(filename)[0]).lower()
-        segments = re.findall(r'^.{0,10}|[ev]\d{1,3}|(?<=\D)\d{1,3}(?=.*\.)|xl',name)
+        segments = re.findall(r'^.{0,10}|[ev]\d{1,3}|(?<=\D)\d{1,3}(?=.*\.)|xl',name) #update this to reduce number spam
         abridgedname = segments.pop(0).title()
         for segment in set(segments):
             abridgedname += "-"+segment.upper()
