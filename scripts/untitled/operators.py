@@ -112,7 +112,7 @@ class TrainDiff(Operation):
     ###From https://github.com/hako-mikan/sd-webui-supermerger
     def oper(self, a, b, c) -> torch.Tensor:
         if torch.allclose(b.float(), c.float(), rtol=0, atol=0):
-            return a
+            return torch.zeros_like(a)
 
         diff_AB = b.float() - c.float()
 

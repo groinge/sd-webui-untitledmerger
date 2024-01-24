@@ -54,7 +54,6 @@ versions = {
     'xl':'conditioner.embedders.0.transformer.text_model.embeddings.token_embedding.weight'
 }
 
-
 def id_checkpoint(name):
     filename = sd_models.get_closet_checkpoint_match(name).filename
     with safetensors.torch.safe_open(filename,framework='pt',device='cpu') as st_file:
