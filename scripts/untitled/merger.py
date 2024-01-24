@@ -29,7 +29,7 @@ SKIP_KEYS = [
 
 cmn.tensor_cache = oper.Cache(cmn.cache_size)
 
-def prepare_merge(calcmode,targets,checkpoints,discard_targets,cludes,timer) -> dict:
+def prepare_merge(calcmode,targets,checkpoints,discard_targets,cludes,timer,finetune) -> dict:
     cmn.primary = checkpoints[0]
     
     with safe_open_multiple(checkpoints,device=cmn.device) as cmn.loaded_checkpoints:
@@ -56,9 +56,24 @@ def prepare_merge(calcmode,targets,checkpoints,discard_targets,cludes,timer) -> 
             clear_cache()
             raise
     
-    cmn.last_merge_tasks = tuple(tasks_copy)
     state_dict.update(dict(results))
-    
+
+    fine = fineman(finetune, False)
+    if finetune:
+        for key in FINETUNES:
+            state_dict.get(key)
+            if key:
+                index = FINETUNES.index(key)
+                if 5 > index : 
+                    state_dict[key] = state_dict[key]* fine[index] 
+                else :state_dict[key] = state_dict[key] + torch.tensor(fine[5]).to(state_dict[key].device)
+                for task in tasks_copy:
+                    if task.key == key:
+                        tasks_copy.remove(task)
+
+
+    cmn.last_merge_tasks = tuple(tasks_copy)
+            
     timer.record('Merge')
     return state_dict
 
@@ -172,3 +187,51 @@ def clear_cache():
     devices.torch_gc()
     torch.cuda.empty_cache()
     return "All caches cleared"
+
+
+#From https://github.com/hako-mikan/sd-webui-supermerger
+def fineman(fine,isxl):
+    if fine.find(",") != -1:
+        tmp = [t.strip() for t in fine.split(",")]
+        fines = [0.0]*8
+        for i,f in enumerate(tmp[0:8]):
+            try:
+                f = float(f)
+                fines[i] = f
+            except Exception:
+                pass
+
+        fine = fines
+    else:
+        return None
+
+    fine = [
+        1 - fine[0] * 0.01,
+        1+ fine[0] * 0.02,
+        1 - fine[1] * 0.01,
+        1+ fine[1] * 0.02,
+        1 - fine[2] * 0.01,
+        [fine[3]*0.02] + colorcalc(fine[4:8],isxl)
+        ]
+    return fine
+
+def colorcalc(cols,isxl):
+    colors = COLSXL if isxl else COLS
+    outs = [[y * cols[i] * 0.02 for y in x] for i,x in enumerate(colors)]
+    return [sum(x) for x in zip(*outs)]
+
+COLS = [[-1,1/3,2/3],[1,1,0],[0,-1,-1],[1,0,1]]
+COLSXL = [[0,0,1],[1,0,0],[-1,-1,0],[-1,1,0]]
+
+def weighttoxl(weight):
+    weight = weight[:9] + weight[12:22] +[0]
+    return weight
+
+FINETUNES = [
+"model.diffusion_model.input_blocks.0.0.weight",
+"model.diffusion_model.input_blocks.0.0.bias",
+"model.diffusion_model.out.0.weight",
+"model.diffusion_model.out.0.bias",
+"model.diffusion_model.out.2.weight",
+"model.diffusion_model.out.2.bias",
+]

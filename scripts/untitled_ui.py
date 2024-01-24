@@ -2,7 +2,7 @@ import gradio as gr
 import os,yaml,re
 import torch,safetensors,safetensors.torch
 from collections import OrderedDict
-from modules import sd_models,script_callbacks,scripts,shared,devices,sd_unet,sd_hijack,sd_models_config,ui_components,paths_internal,ui_loadsave,script_loading,paths,sd_samplers,processing,ui
+from modules import sd_models,script_callbacks,scripts,shared,devices,sd_unet,sd_hijack,sd_models_config,ui_components,paths_internal,ui_loadsave,script_loading,paths,sd_samplers,processing,ui,shared_state
 from modules.timer import Timer
 from modules.ui_common import create_refresh_button,create_output_panel,plaintext_to_html
 from modules.ui import create_sampler_and_steps_selection
@@ -103,6 +103,63 @@ def on_ui_tabs():
                             clude_mode = gr.Radio(label="",info="",choices=["Exclude",("Include exclusively",'include')],value='Exclude',min_width=300,scale=1)
                         discard = gr.Textbox(max_lines=5,label='Discard:',info="Targets will be removed from the model, separate with whitespace.",value='model_ema',lines=5,scale=1)
                     
+                with gr.Accordion("Supermerger Adjust", open=False) as acc_ad:
+                    with gr.Row(variant="compact"):
+                        finetune = gr.Textbox(label="Adjust", show_label=False, info="Adjust IN,OUT,OUT2,Contrast,Brightness,COL1,COL2,COL3", visible=True, value="", lines=1)
+                        finetune_write = gr.Button(value="↑", elem_classes=["tool"])
+                        finetune_read = gr.Button(value="↓", elem_classes=["tool"])
+                        finetune_reset = gr.Button(value="\U0001f5d1\ufe0f", elem_classes=["tool"])
+                    with gr.Row(variant="compact"):
+                        with gr.Column(scale=1, min_width=100):
+                            detail1 = gr.Slider(label="IN", minimum=-6, maximum=6, step=0.01, value=0, info="Detail/Noise")
+                        with gr.Column(scale=1, min_width=100):
+                            detail2 = gr.Slider(label="OUT", minimum=-6, maximum=6, step=0.01, value=0, info="Detail/Noise")
+                        with gr.Column(scale=1, min_width=100):
+                            detail3 = gr.Slider(label="OUT2", minimum=-6, maximum=6, step=0.01, value=0, info="Detail/Noise")
+                    with gr.Row(variant="compact"):
+                        with gr.Column(scale=1, min_width=100):
+                            contrast = gr.Slider(label="Contrast", minimum=-10, maximum=10, step=0.01, value=0, info="Contrast/Detail")
+                        with gr.Column(scale=1, min_width=100):
+                            bri = gr.Slider(label="Brightness", minimum=-10, maximum=10, step=0.01, value=0, info="Dark(Minius)-Bright(Plus)")
+                    with gr.Row(variant="compact"):
+                        with gr.Column(scale=1, min_width=100):
+                            col1 = gr.Slider(label="Cyan-Red", minimum=-10, maximum=10, step=0.01, value=0, info="Cyan(Minius)-Red(Plus)")
+                        with gr.Column(scale=1, min_width=100):
+                            col2 = gr.Slider(label="Magenta-Green", minimum=-10, maximum=10, step=0.01, value=0, info="Magenta(Minius)-Green(Plus)")
+                        with gr.Column(scale=1, min_width=100):
+                            col3 = gr.Slider(label="Yellow-Blue", minimum=-10, maximum=10, step=0.01, value=0, info="Yellow(Minius)-Blue(Plus)")
+                    
+                        finetune.change(fn=lambda x:gr.update(label = f"Supermerger Adjust : {x}"if x != "" and x !="0,0,0,0,0,0,0,0" else "Supermerger Adjust"),inputs=[finetune],outputs = [acc_ad])
+
+                    def finetune_update(finetune, detail1, detail2, detail3, contrast, bri, col1, col2, col3):
+                        arr = [detail1, detail2, detail3, contrast, bri, col1, col2, col3]
+                        tmp = ",".join(map(lambda x: str(int(x)) if x == 0.0 else str(x), arr))
+                        if finetune != tmp:
+                            return gr.update(value=tmp)
+                        return gr.update()
+
+                    def finetune_reader(finetune):
+                        try:
+                            tmp = [float(t) for t in finetune.split(",") if t]
+                            assert len(tmp) == 8, f"expected 8 values, received {len(tmp)}."
+                        except ValueError as err: gr.Warning(str(err))
+                        except AssertionError as err: gr.Warning(str(err))
+                        else: return [gr.update(value=x) for x in tmp]
+                        return [gr.update()]*8
+        
+                    # update finetune
+                    finetunes = [detail1, detail2, detail3, contrast, bri, col1, col2, col3]
+                    finetune_reset.click(fn=lambda: [gr.update(value="")]+[gr.update(value=0.0)]*8, inputs=[], outputs=[finetune, *finetunes])
+                    finetune_read.click(fn=finetune_reader, inputs=[finetune], outputs=[*finetunes])
+                    finetune_write.click(fn=finetune_update, inputs=[finetune, *finetunes], outputs=[finetune])
+                    detail1.release(fn=finetune_update, inputs=[finetune, *finetunes], outputs=finetune, show_progress=False)
+                    detail2.release(fn=finetune_update, inputs=[finetune, *finetunes], outputs=finetune, show_progress=False)
+                    detail3.release(fn=finetune_update, inputs=[finetune, *finetunes], outputs=finetune, show_progress=False)
+                    contrast.release(fn=finetune_update, inputs=[finetune, *finetunes], outputs=finetune, show_progress=False)
+                    bri.release(fn=finetune_update, inputs=[finetune, *finetunes], outputs=finetune, show_progress=False)
+                    col1.release(fn=finetune_update, inputs=[finetune, *finetunes], outputs=finetune, show_progress=False)
+                    col2.release(fn=finetune_update, inputs=[finetune, *finetunes], outputs=finetune, show_progress=False)
+                    col3.release(fn=finetune_update, inputs=[finetune, *finetunes], outputs=finetune, show_progress=False)
 
                 with gr.Row(variant='panel'):
                     device_selector = gr.Radio(label='Preferred device/dtype for merging:',info='',choices=['cuda/float16', 'cuda/float32', 'cpu/float32'],value = 'cuda/float16' )
@@ -186,10 +243,10 @@ def on_ui_tabs():
 
 
             empty_cache_button.click(fn=merger.clear_cache,outputs=status)
-            merge_button.click(fn=start_merge, inputs=[mode_selector,model_a,model_b,model_c,alpha,beta,gamma,delta,weight_editor,save_name,save_settings,discard,clude,clude_mode,smooth],outputs=status)
+            merge_button.click(fn=start_merge, inputs=[mode_selector,model_a,model_b,model_c,alpha,beta,gamma,delta,weight_editor,save_name,save_settings,discard,clude,clude_mode,smooth,finetune],outputs=status)
 
             merge_and_gen_button.click(fn=start_merge, inputs=[
-                mode_selector,model_a,model_b,model_c,alpha,beta,gamma,delta,weight_editor,save_name,save_settings,discard,clude,clude_mode,smooth,
+                mode_selector,model_a,model_b,model_c,alpha,beta,gamma,delta,weight_editor,save_name,save_settings,discard,clude,clude_mode,smooth,finetune,
                 promptbox,negative_promptbox,steps,sampler_name,width,height,batch_count,batch_size,cfg_scale,seed,
                 enable_hr,hr_upscaler,hr_second_pass_steps,denoising_strength,hr_scale,hr_resize_x,hr_resize_y],
                 outputs=[status,output_panel.gallery,infotext,html_log])
@@ -205,7 +262,7 @@ script_callbacks.on_ui_tabs(on_ui_tabs)
 
 WEIGHT_NAMES = ('alpha','beta','gamma','delta')
 
-def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,slider_d,editor,save_name,save_settings,discard,clude,clude_mode,smooth,*genargs):
+def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,slider_d,editor,save_name,save_settings,discard,clude,clude_mode,smooth,finetune,*genargs):
     calcmode = calcmode_selection[calcmode]
     timer = Timer()
     cmn.stop = False
@@ -236,13 +293,10 @@ def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,slid
             continue
         name = model.split(' ')[0]
         checkpoint_info = sd_models.get_closet_checkpoint_match(name)
-        assert checkpoint_info != None, 'Couldn\'t find checkpoint. '+name
-        assert checkpoint_info.filename.endswith('.safetensors'), 'This extension only supports safetensors checkpoints: '+name
+        if checkpoint_info == None: return 'Couldn\'t find checkpoint. '+name
+        if not checkpoint_info.filename.endswith('.safetensors'): return 'This extension only supports safetensors checkpoints: '+name
         
         checkpoints.append(checkpoint_info.filename)
-    else:
-        assert n+1 >= calcmode.input_models, "Missing input models"
-
 
     discards = re.findall(r'[^\s]+', discard, flags=re.I|re.M)
     cludes = [clude_mode.lower(),*re.findall(r'[^\s]+', clude, flags=re.I|re.M)]
@@ -253,7 +307,7 @@ def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,slid
     devices.torch_gc()
 
     #Actual main merge process begins here:
-    state_dict = merger.prepare_merge(calcmode,parsed_targets,checkpoints,discards,cludes,timer)
+    state_dict = merger.prepare_merge(calcmode,parsed_targets,checkpoints,discards,cludes,timer,finetune)
 
     merge_name = create_name(checkpoints,calcmode.name,slider_a)
 
@@ -345,6 +399,9 @@ def image_gen(promptbox,negative_promptbox,steps,sampler_name,width,height,batch
         do_not_save_samples=True,
         do_not_reload_embeddings=True
     )
+
+    p.cached_c = [None,None]
+    p.cached_hr_c = [None,None]
 
     processed = processing.process_images(p)
 
