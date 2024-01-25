@@ -251,4 +251,5 @@ def image_gen(task_id,promptbox,negative_promptbox,steps,sampler_name,width,heig
 
     processed = processing.process_images(p)
 
+    shared.total_tqdm.clear()
     return processed.images, ui_common.plaintext_to_html('\n'.join(processed.infotexts)), ui_common.plaintext_to_html(processed.comments)
