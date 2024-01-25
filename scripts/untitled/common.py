@@ -12,7 +12,9 @@ cache_size = 1024*1024*1024*4
 #Removes loaded model from memory at the start of the merge, requiring a new one to be initialized before loading
 trash_model = False
 
+stop = False
 interrupted = False
+
 loaded_checkpoints = None
 primary = ""
 

@@ -1,6 +1,7 @@
+import gradio as gr
 from safetensors.torch import safe_open
 from safetensors import SafetensorError
-from concurrent.futures import ThreadPoolExecutor
+import concurrent.futures
 from collections import defaultdict
 import scripts.untitled.operators as oper
 import scripts.untitled.misc_util as mutil
@@ -40,6 +41,7 @@ def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,slid
     calcmode = calcmode_selection[calcmode]
     timer = Timer()
     cmn.interrupted = True
+    cmn.stop = False
 
     targets = re.sub(r'#.*$','',editor.lower(),flags=re.M)
     targets = re.sub(r'\bslider_a\b',str(slider_a),targets,flags=re.M)
@@ -58,7 +60,6 @@ def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,slid
                 try:
                     parsed_targets[selector][WEIGHT_NAMES[n]] = float(weight)
                 except ValueError:pass
-
 
     checkpoints = []
     for n, model in enumerate((model_a,model_b,model_c)):
@@ -83,6 +84,8 @@ def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,slid
     #Actual main merge process begins here:
 
     state_dict = prepare_merge(calcmode,parsed_targets,checkpoints,discards,cludes,timer,finetune)
+    if not state_dict:
+        return 'Merge Interrupted'
 
     merge_name = mutil.create_name(checkpoints,calcmode.name,slider_a)
 
@@ -126,9 +129,18 @@ def prepare_merge(calcmode,targets,checkpoints,discard_targets,cludes,timer,fine
 
         timer.record('Prepare merge')
         try:
-            with ThreadPoolExecutor(max_workers=cmn.threads) as executor:
-                results = executor.map(initialize_merge,tasks)
-                executor.shutdown()
+            with concurrent.futures.ThreadPoolExecutor(max_workers=cmn.threads) as executor:
+                futures = [executor.submit(initialize_merge, task) for task in tasks]
+                while True:
+                    done, not_done = concurrent.futures.wait(futures,timeout=0.1)
+                    if cmn.stop:
+                        gr.Info('Stopping merge')
+                        executor.shutdown(wait=False,cancel_futures=True)
+                        return None
+                    
+                    if len(not_done) == 0:
+                        results = [future.result() for future in done]
+                        break
         except:
             clear_cache()
             raise

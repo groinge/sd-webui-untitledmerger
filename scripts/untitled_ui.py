@@ -21,9 +21,6 @@ with open(ext2abs('scripts','examplemerge.yaml'), 'r') as file:
 
 model_a_keys = []
 
-recently_saved = []
-recent_save_prefix = '[Recent save] '
-
 def on_ui_tabs():
     with gr.Blocks() as blocksui:
         dummy_component = gr.Textbox(visible=False,interactive=True)
@@ -85,10 +82,14 @@ def on_ui_tabs():
                         #### MERGE BUTTONS
                         merge_button = gr.Button(value='Merge',variant='primary')
                         merge_and_gen_button = gr.Button(value='Merge & Gen',variant='primary')
-                        gen_button = gr.Button(value='Gen',variant='primary')
                         with gr.Row():
                             empty_cache_button = gr.Button(value='Empty Cache')
-                            #stop_button = gr.Button(value='Stop merge')
+                            stop_button = gr.Button(value='Stop merge')
+
+                            empty_cache_button.click(fn=merger.clear_cache,outputs=status)
+                            def stopfunc(): cmn.stop = True
+                            stop_button.click(fn=stopfunc)
+
                 with gr.Accordion(label='Include/Exclude/Discard',open=False):
                     with gr.Row():
                         with gr.Column():
@@ -169,8 +170,10 @@ def on_ui_tabs():
                 with gr.Tab(label='Image gen'):
                     with gr.Column(variant='panel'):
                         output_panel = create_output_panel('untitled_merger', shared.opts.outdir_txt2img_samples)
-                        with gr.Accordion('Generation info',open=False):
-                            infotext = gr.HTML(elem_id=f'html_info_{gen_elem_id}', elem_classes="infotext")
+                        with gr.Row(equal_height=False):
+                            with gr.Accordion('Generation info',open=False,scale=3):
+                                infotext = gr.HTML(elem_id=f'html_info_{gen_elem_id}', elem_classes="infotext",scale=3)
+                            gen_button = gr.Button(value='Gen',variant='primary',scale=1)
 
                     with gr.Row(elem_id=f"{gen_elem_id}_prompt_container", elem_classes=["prompt-container-compact"],equal_height=True):
                             promptbox = gr.Textbox(label="Prompt", elem_id=f"{gen_elem_id}_prompt", show_label=False, lines=3, placeholder="Prompt", elem_classes=["prompt"])
@@ -195,7 +198,7 @@ def on_ui_tabs():
                         cfg_scale = gr.Slider(minimum=1.0, maximum=30.0, step=0.5, label='CFG Scale', value=7.0, elem_id=f"{gen_elem_id}_cfg_scale")
                         
                     with gr.Row():
-                        seed = gr.Number(label='Seed', value=-1, elem_id=gen_elem_id+" seed", min_width=100, precision=0)
+                        seed = gr.Number(label='Seed', value=1, elem_id=gen_elem_id+" seed", min_width=100, precision=0)
 
                         random_seed = ui_components.ToolButton(ui.random_symbol, elem_id=gen_elem_id+" random_seed", tooltip="Set seed to -1, which will cause a new random number to be used every time")
                         random_seed.click(fn=None, _js="function(){setRandomSeed('" + gen_elem_id+" seed" + "')}", show_progress=False, inputs=[], outputs=[])
@@ -234,7 +237,7 @@ def on_ui_tabs():
                     target_tester.change(fn=test_regex,inputs=[target_tester],outputs=target_tester_display,show_progress='minimal')
 
 
-            empty_cache_button.click(fn=merger.clear_cache,outputs=status)
+            
 
             merge_args = [
                 mode_selector,
@@ -371,5 +374,5 @@ def calcmode_changed(calcmode_name):
 
 def refresh_models():
     sd_models.list_models()
-    checkpoints_list = recently_saved + checkpoints_no_pickles()
+    checkpoints_list = checkpoints_no_pickles()
     return gr.update(choices=checkpoints_list),gr.update(choices=checkpoints_list),gr.update(choices=checkpoints_list)

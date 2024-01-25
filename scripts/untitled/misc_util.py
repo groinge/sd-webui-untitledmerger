@@ -151,6 +151,9 @@ def save_loaded_model(name,settings):
     return 'Model saved as: '+checkpoint_info.filename
 
 
+recently_saved = []
+recent_save_prefix = '[Recent save] '
+
 def save_state_dict(state_dict,name,settings,timer=None):
     global recently_saved
     fileext = ".fp16.safetensors" if 'fp16' in settings else '.safetensors'

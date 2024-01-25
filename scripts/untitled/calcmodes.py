@@ -54,7 +54,7 @@ CALCMODES_LIST.append(WeightSum)
 
 class AddDifference(CalcMode):
     name = 'Add Difference'
-    description = 'model_a + (mode_b - model_c) * alpha'
+    description = 'model_a + (model_b - model_c) * alpha'
     input_models = 3
     input_sliders = 1
     slid_a_info = "alpha"
@@ -80,7 +80,7 @@ CALCMODES_LIST.append(AddDifference)
 
 class TrainDifference(CalcMode):
     name = 'Train Difference'
-    description = 'description'
+    description = 'model_a + (model_b - model_c) * alpha'
     input_models = 3
     input_sliders = 1
     slid_a_info = "alpha"
@@ -106,7 +106,7 @@ CALCMODES_LIST.append(TrainDifference)
 
 class Extract(CalcMode):
     name = 'Extract'
-    description = 'description'
+    description = 'Adds (dis)similar features between (model_b - model_a) and (model_c - model_a) to model_a'
     input_models = 3
     input_sliders = 4
     
@@ -116,7 +116,7 @@ class Extract(CalcMode):
     slid_b_info = 'similarity - dissimilarity'
     slid_b_config = (0, 1, 0.01)
 
-    slid_c_info = 'narrow dissimilarity - narrow similarity'
+    slid_c_info = 'similarity bias'
     slid_c_config = (0, 2, 0.01)
 
     slid_d_info = 'addition multiplier'
@@ -136,8 +136,41 @@ class Extract(CalcMode):
 
         res = opr.Add(key, a, multiplied)
         return res
-    
+
 CALCMODES_LIST.append(Extract)
+
+
+class AddDisimilarity(CalcMode):
+    name = 'Add Dissimilarites'
+    description = 'Adds dissimalar features between model_b and model_c to model_a'
+    input_models = 3
+    input_sliders = 3
+    
+    slid_a_info = 'model_b - model_c'
+    slid_a_config = (0, 1, 0.01)
+
+    slid_b_info = 'addition multiplier'
+    slid_b_config = (-1, 4, 0.01)
+
+    slid_c_info = 'similarity bias'
+    slid_c_config = (0, 2, 0.01)
+
+    def create_recipe(key, model_a, model_b, model_c, alpha=0, beta=0, gamma=0, delta=1, smooth=False):
+        a = opr.LoadTensor(key,model_a)
+        b = opr.LoadTensor(key,model_b)
+        c = opr.LoadTensor(key,model_c)
+
+        extracted = opr.Extract(key, alpha, 1, gamma*15, b, c)
+        if smooth:
+            extracted = opr.Smooth(key, extracted)
+        extracted.cache()
+
+        multiplied = opr.Multiply(key, beta, extracted)
+
+        res = opr.Add(key, a, multiplied)
+        return res
+    
+CALCMODES_LIST.append(AddDisimilarity)
         
 
 

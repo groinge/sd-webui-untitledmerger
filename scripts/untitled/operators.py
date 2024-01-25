@@ -42,7 +42,7 @@ class Operation:
     def __hash__(self):
         return hash((self.key, self.alpha, self.beta, self.gamma, self.sources))
     
-    def oper(self,*args):
+    def oper(self,*args) -> torch.Tensor:
         raise NotImplementedError
 
     def merge(self):
