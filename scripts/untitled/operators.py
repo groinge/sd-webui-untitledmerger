@@ -1,8 +1,5 @@
-import torch,scipy
+import torch,scipy,cachetools
 import scripts.untitled.common as cmn
-from copy import deepcopy
-from collections import OrderedDict
-
 
 
 #Wrappers
@@ -18,15 +15,14 @@ def recurse(operation):
 def cache_operation(func):
     def inner(operation):
         try:
-            return cmn.tensor_cache.retrieve(operation)
+            return weights_cache[operation]
         except KeyError:pass
 
         result = func(operation)
 
-        cmn.tensor_cache.append(operation,result)
+        weights_cache[operation] = result
         return result
     return inner
-
 
 
 ###OPERATORS####
@@ -159,33 +155,19 @@ class Extract(ExtractRelative):
 
     def oper(self, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
         return super().oper(None,a,b)
+    
 
+#The cache
+class WeightsCache(cachetools.LRUCache):
+    def __init__(self, size):
+        super().__init__(size,lambda x: x.element_size() * x.nelement())
 
-#High overhead, is only worth using for computationally demanding operations
-class Cache:
-    def __init__(self,size):
-        self.cache = OrderedDict()
-        self.size = size
-        self.footprint = 0
+    def __setitem__(self, key, value):
+        value = value.detach().cpu()
+        super().__setitem__(key,value)
 
-    def append(self,key, tensor):
-        if key in self.cache:
-            self.cache.move_to_end(key)
-        else:
-            tensor = tensor.detach().cpu()
-            self.cache.update({key:tensor})
-            self.footprint += tensor_size(tensor)
-            self.clear()
+    def __getitem__(self, key: Operation) -> torch.Tensor:
+        res = super().__getitem__(key)
+        return res.clone().to(cmn.device).type(cmn.precision)
 
-    def retrieve(self,key):
-        tensor = self.cache[key]
-        self.cache.move_to_end(key)
-        return tensor.detach().clone().to(cmn.device).type(cmn.precision)
-
-    def clear(self):
-        while self.footprint > self.size:
-            tensor = self.cache.popitem(last=False)[1]
-            self.footprint -= tensor_size(tensor)
-
-def tensor_size(t: torch.Tensor) -> int:
-    return t.element_size() * t.nelement()
+weights_cache = WeightsCache(cmn.cache_size)

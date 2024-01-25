@@ -14,7 +14,6 @@ from modules import devices,shared,script_loading,paths,paths_internal,sd_models
 
 networks = script_loading.load_module(os.path.join(paths.extensions_builtin_dir,'Lora','networks.py'))
 
-cmn.tensor_cache = oper.Cache(cmn.cache_size)
 
 SKIP_KEYS = [
     "alphas_cumprod",
@@ -230,6 +229,7 @@ def get_tensors_from_loaded_model(state_dict,tasks) -> dict:
         with torch.no_grad():
             for module in shared.sd_model.modules():
                 networks.network_restore_weights_from_backup(module)
+
         old_state_dict = shared.sd_model.state_dict()
 
         for task in intersected:
@@ -260,7 +260,7 @@ class safe_open_multiple(object):
 
 
 def clear_cache():
-    cmn.tensor_cache.__init__(cmn.cache_size)
+    oper.weights_cache.__init__(cmn.cache_size)
     gc.collect()
     devices.torch_gc()
     torch.cuda.empty_cache()

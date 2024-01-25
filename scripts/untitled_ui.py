@@ -2,7 +2,6 @@ import gradio as gr
 import os,re,functools
 import torch,safetensors,safetensors.torch
 from modules import sd_models,script_callbacks,scripts,shared,ui_components,paths,sd_samplers,ui,call_queue
-from modules.timer import Timer
 from modules.ui_common import create_output_panel,plaintext_to_html
 from modules.ui import create_sampler_and_steps_selection
 from scripts.untitled import merger,misc_util
@@ -325,6 +324,7 @@ def change_preferred_device(input):
     cmn.device,dtype = input.split('/')
                      
     if dtype == 'float16': cmn.precision=torch.float16
+    elif dtype == 'float8': cmn.precision=torch.float8_e4m3fn
     else: cmn.precision = torch.float32
 
 

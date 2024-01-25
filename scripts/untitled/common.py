@@ -8,7 +8,6 @@ precision = float16
 
 #Size in bytes
 cache_size = 1024*1024*1024*4
-tensor_cache = None
 
 #Removes loaded model from memory at the start of the merge, requiring a new one to be initialized before loading
 trash_model = False

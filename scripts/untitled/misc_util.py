@@ -197,6 +197,9 @@ def save_state_dict(state_dict,name,settings,timer=None):
 
 def load_merged_state_dict(state_dict,checkpoint_info):
     config = sd_models_config.find_checkpoint_config(state_dict, checkpoint_info)
+    
+    for key, weight in state_dict.items():
+        state_dict[key] = weight.half()
 
     if shared.sd_model.used_config == config:
         print('Loading weights using already loaded model...')
