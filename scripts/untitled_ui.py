@@ -1,10 +1,10 @@
 import gradio as gr
-import os,yaml,re
+import os,yaml,re,functools
 import torch,safetensors,safetensors.torch
 from collections import OrderedDict
-from modules import sd_models,script_callbacks,scripts,shared,devices,sd_unet,sd_hijack,sd_models_config,ui_components,paths_internal,ui_loadsave,script_loading,paths,sd_samplers,processing,ui,shared_state
+from modules import sd_models,script_callbacks,scripts,shared,devices,sd_unet,sd_hijack,sd_models_config,ui_components,paths_internal,ui_loadsave,script_loading,paths,sd_samplers,processing,ui,call_queue,txt2img
 from modules.timer import Timer
-from modules.ui_common import create_refresh_button,create_output_panel,plaintext_to_html
+from modules.ui_common import create_output_panel,plaintext_to_html
 from modules.ui import create_sampler_and_steps_selection
 from scripts.untitled import merger,misc_util,calcmodes
 import scripts.untitled.common as cmn
@@ -34,6 +34,7 @@ recent_save_prefix = '[Recent save] '
 
 def on_ui_tabs():
     with gr.Blocks() as blocksui:
+        dummy_component = gr.Textbox(visible=False,interactive=True)
         with ui_components.ResizeHandleRow():
             with gr.Column():
                 status = gr.Textbox(max_lines=1,label="",info="",interactive=False,render=False)
@@ -171,14 +172,13 @@ def on_ui_tabs():
             gen_elem_id = 'untitled_merger'
             with gr.Column():
                 status.render()
-                weight_editor = gr.Code(value=EXAMPLE,lines=20,language='yaml',label='')
+                with gr.Accordion('Weight editor'):
+                    weight_editor = gr.Code(value=EXAMPLE,lines=20,language='yaml',label='')
                 with gr.Tab(label='Image gen'):
-
-                    output_panel = create_output_panel(gen_elem_id, shared.opts.outdir_txt2img_samples)
-                    with gr.Accordion('Generation info',open=False):
-                            generation_info = gr.HTML(elem_id=f'html_info_x_{gen_elem_id}')
+                    with gr.Column(variant='panel'):
+                        output_panel = create_output_panel('untitled_merger', shared.opts.outdir_txt2img_samples)
+                        with gr.Accordion('Generation info',open=False):
                             infotext = gr.HTML(elem_id=f'html_info_{gen_elem_id}', elem_classes="infotext")
-                            html_log = gr.HTML(elem_id=f'html_log_{gen_elem_id}')
 
                     with gr.Row(elem_id=f"{gen_elem_id}_prompt_container", elem_classes=["prompt-container-compact"],equal_height=True):
                             promptbox = gr.Textbox(label="Prompt", elem_id=f"{gen_elem_id}_prompt", show_label=False, lines=3, placeholder="Prompt", elem_classes=["prompt"])
@@ -243,18 +243,72 @@ def on_ui_tabs():
 
 
             empty_cache_button.click(fn=merger.clear_cache,outputs=status)
-            merge_button.click(fn=start_merge, inputs=[mode_selector,model_a,model_b,model_c,alpha,beta,gamma,delta,weight_editor,save_name,save_settings,discard,clude,clude_mode,smooth,finetune],outputs=status)
 
-            merge_and_gen_button.click(fn=start_merge, inputs=[
-                mode_selector,model_a,model_b,model_c,alpha,beta,gamma,delta,weight_editor,save_name,save_settings,discard,clude,clude_mode,smooth,finetune,
-                promptbox,negative_promptbox,steps,sampler_name,width,height,batch_count,batch_size,cfg_scale,seed,
-                enable_hr,hr_upscaler,hr_second_pass_steps,denoising_strength,hr_scale,hr_resize_x,hr_resize_y],
-                outputs=[status,output_panel.gallery,infotext,html_log])
+            merge_args = [
+                mode_selector,
+                model_a,
+                model_b,
+                model_c,
+                alpha,
+                beta,
+                gamma,
+                delta,
+                weight_editor,
+                save_name,
+                save_settings,
+                discard,
+                clude,
+                clude_mode,
+                smooth,
+                finetune
+                ]
             
-            gen_button.click(fn=image_gen,inputs=[
-                promptbox,negative_promptbox,steps,sampler_name,width,height,batch_count,batch_size,cfg_scale,seed,
-                enable_hr,hr_upscaler,hr_second_pass_steps,denoising_strength,hr_scale,hr_resize_x,hr_resize_y],
-                outputs=[output_panel.gallery,infotext,html_log])
+            gen_args = [
+                dummy_component, 
+                promptbox,
+                negative_promptbox,
+                steps,
+                sampler_name,
+                width,
+                height,
+                batch_count,
+                batch_size,
+                cfg_scale,
+                seed,
+                enable_hr,
+                hr_upscaler,
+                hr_second_pass_steps,
+                denoising_strength,
+                hr_scale,
+                hr_resize_x,
+                hr_resize_y
+            ]
+
+            merge_button.click(fn=start_merge,inputs=merge_args,outputs=status)
+
+            def merge_interrupted(func):
+                @functools.wraps(func)
+                def inner(*args):
+                    if not cmn.interrupted:
+                        return func(*args)
+                    else:
+                        return gr.update(),gr.update(),gr.update()
+                return inner
+
+
+            merge_and_gen_button.click(fn=start_merge,
+                                       inputs=merge_args,
+                                       outputs=status).then(
+                                        fn=merge_interrupted(call_queue.wrap_gradio_gpu_call(image_gen, extra_outputs=[None, '', ''])),
+                                        _js='submit_imagegen',
+                                        inputs=gen_args,
+                                        outputs=[output_panel.gallery,infotext,output_panel.html_log]
+                                        
+            )
+            gen_button.click(fn=call_queue.wrap_gradio_gpu_call(image_gen, extra_outputs=[None, '', '']),
+                            _js='submit_imagegen',
+                            inputs=gen_args,
+                            outputs=[output_panel.gallery,infotext,output_panel.html_log])
 
     return [(blocksui, "Untitled merger", "untitled_merger")]
 
@@ -262,10 +316,10 @@ script_callbacks.on_ui_tabs(on_ui_tabs)
 
 WEIGHT_NAMES = ('alpha','beta','gamma','delta')
 
-def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,slider_d,editor,save_name,save_settings,discard,clude,clude_mode,smooth,finetune,*genargs):
+def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,slider_d,editor,save_name,save_settings,discard,clude,clude_mode,smooth,finetune):
     calcmode = calcmode_selection[calcmode]
     timer = Timer()
-    cmn.stop = False
+    cmn.interrupted = True
 
     targets = re.sub(r'#.*$','',editor.lower(),flags=re.M)
     targets = re.sub(r'\bslider_a\b',str(slider_a),targets,flags=re.M)
@@ -307,6 +361,7 @@ def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,slid
     devices.torch_gc()
 
     #Actual main merge process begins here:
+
     state_dict = merger.prepare_merge(calcmode,parsed_targets,checkpoints,discards,cludes,timer,finetune)
 
     merge_name = create_name(checkpoints,calcmode.name,slider_a)
@@ -324,16 +379,10 @@ def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,slid
     timer.record('Load model')
     del state_dict
     devices.torch_gc()
-
-    
-    if genargs:
-        imagegen_results = image_gen(*genargs)
-        timer.record('Image gen')
-
+    cmn.interrupted = False
     message = 'Merge completed in ' + timer.summary()
     print(message)
     
-    if genargs: return message, *imagegen_results
     return message
 
 
@@ -371,9 +420,8 @@ def update_model_a_keys(model_a):
         model_a_keys = file.keys()
 
 
-def image_gen(promptbox,negative_promptbox,steps,sampler_name,width,height,batch_count,batch_size,cfg_scale,seed,
+def image_gen(task_id,promptbox,negative_promptbox,steps,sampler_name,width,height,batch_count,batch_size,cfg_scale,seed,
               enable_hr,hr_upscaler,hr_second_pass_steps,denoising_strength,hr_scale,hr_resize_x,hr_resize_y):
-    shared.state.begin()
     p = processing.StableDiffusionProcessingTxt2Img(
         sd_model=shared.sd_model,
         outpath_samples=shared.opts.outdir_samples or shared.opts.outdir_txt2img_samples,
@@ -405,9 +453,7 @@ def image_gen(promptbox,negative_promptbox,steps,sampler_name,width,height,batch
 
     processed = processing.process_images(p)
 
-    shared.state.end()
-
-    return processed.images, processed.infotexts, processed.comments
+    return processed.images, plaintext_to_html('\n'.join(processed.infotexts)), plaintext_to_html(processed.comments)
     
 
 def create_name(checkpoints,calcmode,alpha):
