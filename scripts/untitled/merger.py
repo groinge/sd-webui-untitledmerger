@@ -5,12 +5,16 @@ from collections import defaultdict
 import scripts.untitled.operators as oper
 import scripts.untitled.misc_util as mutil
 import scripts.untitled.common as cmn
+import scripts.untitled.calcmodes as calcmodes
+from modules.timer import Timer
 import torch,os,re,gc
 from tqdm import tqdm
 from copy import copy,deepcopy
-from modules import devices,shared,script_loading,paths,paths_internal
+from modules import devices,shared,script_loading,paths,paths_internal,sd_models,sd_unet,sd_hijack
 
 networks = script_loading.load_module(os.path.join(paths.extensions_builtin_dir,'Lora','networks.py'))
+
+cmn.tensor_cache = oper.Cache(cmn.cache_size)
 
 SKIP_KEYS = [
     "alphas_cumprod",
@@ -27,7 +31,81 @@ SKIP_KEYS = [
     "sqrt_recipm1_alphas_cumprod"
 ]
 
-cmn.tensor_cache = oper.Cache(cmn.cache_size)
+WEIGHT_NAMES = ('alpha','beta','gamma','delta')
+
+calcmode_selection = {}
+for calcmode in calcmodes.CALCMODES_LIST:
+    calcmode_selection.update({calcmode.name: calcmode})
+
+def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,slider_d,editor,save_name,save_settings,discard,clude,clude_mode,smooth,finetune):
+    calcmode = calcmode_selection[calcmode]
+    timer = Timer()
+    cmn.interrupted = True
+
+    targets = re.sub(r'#.*$','',editor.lower(),flags=re.M)
+    targets = re.sub(r'\bslider_a\b',str(slider_a),targets,flags=re.M)
+    targets = re.sub(r'\bslider_b\b',str(slider_b),targets,flags=re.M)
+    targets = re.sub(r'\bslider_c\b',str(slider_c),targets,flags=re.M)
+    targets = re.sub(r'\bslider_d\b',str(slider_d),targets,flags=re.M)
+
+    targets_list = targets.split('\n')
+    parsed_targets = {}
+    for target in targets_list:
+        if target != "":
+            target = re.sub(r'\s+','',target)
+            selector, weights = target.split(':')
+            parsed_targets[selector] = {'smooth':smooth}
+            for n,weight in enumerate(weights.split(',')):
+                try:
+                    parsed_targets[selector][WEIGHT_NAMES[n]] = float(weight)
+                except ValueError:pass
+
+
+    checkpoints = []
+    for n, model in enumerate((model_a,model_b,model_c)):
+        if n+1 > calcmode.input_models:
+            checkpoints.append("")
+            continue
+        name = model.split(' ')[0]
+        checkpoint_info = sd_models.get_closet_checkpoint_match(name)
+        if checkpoint_info == None: return 'Couldn\'t find checkpoint. '+name
+        if not checkpoint_info.filename.endswith('.safetensors'): return 'This extension only supports safetensors checkpoints: '+name
+        
+        checkpoints.append(checkpoint_info.filename)
+
+    discards = re.findall(r'[^\s]+', discard, flags=re.I|re.M)
+    cludes = [clude_mode.lower(),*re.findall(r'[^\s]+', clude, flags=re.I|re.M)]
+
+    sd_models.unload_model_weights(shared.sd_model)
+    sd_unet.apply_unet("None")
+    sd_hijack.model_hijack.undo_hijack(shared.sd_model)
+    devices.torch_gc()
+
+    #Actual main merge process begins here:
+
+    state_dict = prepare_merge(calcmode,parsed_targets,checkpoints,discards,cludes,timer,finetune)
+
+    merge_name = mutil.create_name(checkpoints,calcmode.name,slider_a)
+
+    checkpoint_info = deepcopy(sd_models.get_closet_checkpoint_match(model_a))
+    checkpoint_info.short_title = hash(cmn.last_merge_tasks)
+    checkpoint_info.name_for_extra = '_TEMP_MERGE_'+merge_name
+
+    if 'Autosave' in save_settings:
+        checkpoint_info = mutil.save_state_dict(state_dict,save_name or merge_name,save_settings,timer)
+    
+    with mutil.NoCaching():
+        mutil.load_merged_state_dict(state_dict,checkpoint_info)
+    
+    timer.record('Load model')
+    del state_dict
+    devices.torch_gc()
+    cmn.interrupted = False
+    message = 'Merge completed in ' + timer.summary()
+    print(message)
+    
+    return message
+
 
 def prepare_merge(calcmode,targets,checkpoints,discard_targets,cludes,timer,finetune) -> dict:
     cmn.primary = checkpoints[0]

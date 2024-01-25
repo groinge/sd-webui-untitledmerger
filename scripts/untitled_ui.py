@@ -1,16 +1,13 @@
 import gradio as gr
-import os,yaml,re,functools
+import os,re,functools
 import torch,safetensors,safetensors.torch
-from collections import OrderedDict
-from modules import sd_models,script_callbacks,scripts,shared,devices,sd_unet,sd_hijack,sd_models_config,ui_components,paths_internal,ui_loadsave,script_loading,paths,sd_samplers,processing,ui,call_queue,txt2img
+from modules import sd_models,script_callbacks,scripts,shared,ui_components,paths,sd_samplers,ui,call_queue
 from modules.timer import Timer
 from modules.ui_common import create_output_panel,plaintext_to_html
 from modules.ui import create_sampler_and_steps_selection
-from scripts.untitled import merger,misc_util,calcmodes
+from scripts.untitled import merger,misc_util
 import scripts.untitled.common as cmn
 from copy import deepcopy
-
-networks = script_loading.load_module(os.path.join(paths.extensions_builtin_dir,'Lora','networks.py'))
 
 checkpoints_no_pickles = lambda: [checkpoint for checkpoint in sd_models.checkpoint_tiles() if checkpoint.split(' ')[0].endswith('.safetensors')]
 
@@ -22,10 +19,6 @@ sd_checkpoints_path = os.path.join(paths.models_path,'Stable-diffusion')
         
 with open(ext2abs('scripts','examplemerge.yaml'), 'r') as file:
     EXAMPLE = file.read()
-
-calcmode_selection = {}
-for calcmode in calcmodes.CALCMODES_LIST:
-    calcmode_selection.update({calcmode.name: calcmode})
 
 model_a_keys = []
 
@@ -69,7 +62,7 @@ def on_ui_tabs():
 
                 #### MODE SELECTION
                 with gr.Row():
-                    mode_selector = gr.Radio(label='Merge mode:',choices=list(calcmode_selection.keys()),value=list(calcmode_selection.keys())[0],scale=3)
+                    mode_selector = gr.Radio(label='Merge mode:',choices=list(merger.calcmode_selection.keys()),value=list(merger.calcmode_selection.keys())[0],scale=3)
                     smooth = gr.Checkbox(label='Smooth Add',info='Filter additions to prevent burning at high weights',show_label=True,scale=1)
                 
                 ##### MAIN SLIDERS
@@ -87,7 +80,7 @@ def on_ui_tabs():
                         with gr.Row():
                             save_settings = gr.CheckboxGroup(label = " ",choices=["Autosave","Overwrite","fp16"],value=['fp16'],interactive=True,scale=2,min_width=100)
                             save_loaded = gr.Button(value='Save loaded checkpoint',size='sm',scale=1)
-                            save_loaded.click(fn=save_loaded_model, inputs=[save_name,save_settings],outputs=status).then(fn=refresh_models,outputs=[model_a,model_b,model_c])
+                            save_loaded.click(fn=misc_util.save_loaded_model, inputs=[save_name,save_settings],outputs=status).then(fn=refresh_models,outputs=[model_a,model_b,model_c])
 
                     with gr.Column():
                         #### MERGE BUTTONS
@@ -284,7 +277,7 @@ def on_ui_tabs():
                 hr_resize_y
             ]
 
-            merge_button.click(fn=start_merge,inputs=merge_args,outputs=status)
+            merge_button.click(fn=merger.start_merge,inputs=merge_args,outputs=status)
 
             def merge_interrupted(func):
                 @functools.wraps(func)
@@ -295,17 +288,16 @@ def on_ui_tabs():
                         return gr.update(),gr.update(),gr.update()
                 return inner
 
-
-            merge_and_gen_button.click(fn=start_merge,
+            merge_and_gen_button.click(fn=merger.start_merge,
                                        inputs=merge_args,
                                        outputs=status).then(
-                                        fn=merge_interrupted(call_queue.wrap_gradio_gpu_call(image_gen, extra_outputs=[None, '', ''])),
+                                        fn=merge_interrupted(call_queue.wrap_gradio_gpu_call(misc_util.image_gen, extra_outputs=[None, '', ''])),
                                         _js='submit_imagegen',
                                         inputs=gen_args,
                                         outputs=[output_panel.gallery,infotext,output_panel.html_log]
                                         
             )
-            gen_button.click(fn=call_queue.wrap_gradio_gpu_call(image_gen, extra_outputs=[None, '', '']),
+            gen_button.click(fn=call_queue.wrap_gradio_gpu_call(misc_util.image_gen, extra_outputs=[None, '', '']),
                             _js='submit_imagegen',
                             inputs=gen_args,
                             outputs=[output_panel.gallery,infotext,output_panel.html_log])
@@ -313,97 +305,6 @@ def on_ui_tabs():
     return [(blocksui, "Untitled merger", "untitled_merger")]
 
 script_callbacks.on_ui_tabs(on_ui_tabs)
-
-WEIGHT_NAMES = ('alpha','beta','gamma','delta')
-
-def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,slider_d,editor,save_name,save_settings,discard,clude,clude_mode,smooth,finetune):
-    calcmode = calcmode_selection[calcmode]
-    timer = Timer()
-    cmn.interrupted = True
-
-    targets = re.sub(r'#.*$','',editor.lower(),flags=re.M)
-    targets = re.sub(r'\bslider_a\b',str(slider_a),targets,flags=re.M)
-    targets = re.sub(r'\bslider_b\b',str(slider_b),targets,flags=re.M)
-    targets = re.sub(r'\bslider_c\b',str(slider_c),targets,flags=re.M)
-    targets = re.sub(r'\bslider_d\b',str(slider_d),targets,flags=re.M)
-
-    targets_list = targets.split('\n')
-    parsed_targets = {}
-    for target in targets_list:
-        if target != "":
-            target = re.sub(r'\s+','',target)
-            selector, weights = target.split(':')
-            parsed_targets[selector] = {'smooth':smooth}
-            for n,weight in enumerate(weights.split(',')):
-                try:
-                    parsed_targets[selector][WEIGHT_NAMES[n]] = float(weight)
-                except ValueError:pass
-
-
-    checkpoints = []
-    for n, model in enumerate((model_a,model_b,model_c)):
-        if n+1 > calcmode.input_models:
-            checkpoints.append("")
-            continue
-        name = model.split(' ')[0]
-        checkpoint_info = sd_models.get_closet_checkpoint_match(name)
-        if checkpoint_info == None: return 'Couldn\'t find checkpoint. '+name
-        if not checkpoint_info.filename.endswith('.safetensors'): return 'This extension only supports safetensors checkpoints: '+name
-        
-        checkpoints.append(checkpoint_info.filename)
-
-    discards = re.findall(r'[^\s]+', discard, flags=re.I|re.M)
-    cludes = [clude_mode.lower(),*re.findall(r'[^\s]+', clude, flags=re.I|re.M)]
-
-    sd_models.unload_model_weights(shared.sd_model)
-    sd_unet.apply_unet("None")
-    sd_hijack.model_hijack.undo_hijack(shared.sd_model)
-    devices.torch_gc()
-
-    #Actual main merge process begins here:
-
-    state_dict = merger.prepare_merge(calcmode,parsed_targets,checkpoints,discards,cludes,timer,finetune)
-
-    merge_name = create_name(checkpoints,calcmode.name,slider_a)
-
-    checkpoint_info = deepcopy(sd_models.get_closet_checkpoint_match(model_a))
-    checkpoint_info.short_title = hash(cmn.last_merge_tasks)
-    checkpoint_info.name_for_extra = '_TEMP_MERGE_'+merge_name
-
-    if 'Autosave' in save_settings:
-        checkpoint_info = save_state_dict(state_dict,save_name or merge_name,save_settings,timer)
-    
-    with NoCaching():
-        load_merged_state_dict(state_dict,checkpoint_info)
-    
-    timer.record('Load model')
-    del state_dict
-    devices.torch_gc()
-    cmn.interrupted = False
-    message = 'Merge completed in ' + timer.summary()
-    print(message)
-    
-    return message
-
-
-def load_merged_state_dict(state_dict,checkpoint_info):
-    config = sd_models_config.find_checkpoint_config(state_dict, checkpoint_info)
-
-    if shared.sd_model.used_config == config:
-        print('Loading weights using already loaded model...')
-
-        load_timer = Timer()
-        sd_models.load_model_weights(shared.sd_model, checkpoint_info, state_dict, load_timer)
-        print('Loaded weights in: '+load_timer.summary())
-
-        sd_hijack.model_hijack.hijack(shared.sd_model)
-
-        script_callbacks.model_loaded_callback(shared.sd_model)
-
-        sd_models.model_data.set_sd_model(shared.sd_model)
-        sd_unet.apply_unet()
-    else:
-        sd_models.load_model(checkpoint_info=checkpoint_info, already_loaded_state_dict=state_dict)
 
 
 def test_regex(input):
@@ -418,124 +319,6 @@ def update_model_a_keys(model_a):
     path = sd_models.get_closet_checkpoint_match(model_a).filename
     with safetensors.torch.safe_open(path,framework='pt',device='cpu') as file:
         model_a_keys = file.keys()
-
-
-def image_gen(task_id,promptbox,negative_promptbox,steps,sampler_name,width,height,batch_count,batch_size,cfg_scale,seed,
-              enable_hr,hr_upscaler,hr_second_pass_steps,denoising_strength,hr_scale,hr_resize_x,hr_resize_y):
-    p = processing.StableDiffusionProcessingTxt2Img(
-        sd_model=shared.sd_model,
-        outpath_samples=shared.opts.outdir_samples or shared.opts.outdir_txt2img_samples,
-        outpath_grids=shared.opts.outdir_grids or shared.opts.outdir_txt2img_grids,
-        prompt=promptbox,
-        negative_prompt=negative_promptbox,
-        seed=seed,
-        sampler_name=sampler_name,
-        batch_size=batch_size,
-        n_iter=batch_count,
-        steps=steps,
-        cfg_scale=cfg_scale,
-        width=width,
-        height=height,
-        enable_hr=enable_hr,
-        hr_scale=hr_scale,
-        hr_upscaler=hr_upscaler,
-        hr_second_pass_steps=hr_second_pass_steps,
-        hr_resize_x=hr_resize_x,
-        hr_resize_y=hr_resize_y,
-        denoising_strength=denoising_strength,
-        do_not_save_grid=True,
-        do_not_save_samples=True,
-        do_not_reload_embeddings=True
-    )
-
-    p.cached_c = [None,None]
-    p.cached_hr_c = [None,None]
-
-    processed = processing.process_images(p)
-
-    return processed.images, plaintext_to_html('\n'.join(processed.infotexts)), plaintext_to_html(processed.comments)
-    
-
-def create_name(checkpoints,calcmode,alpha):
-    names = []
-    try:
-        checkpoints = checkpoints[0:3]
-    except:pass
-    for filename in checkpoints:
-        name = os.path.basename(os.path.splitext(filename)[0]).lower()
-        segments = re.findall(r'^.{0,10}|[ev]\d{1,3}|(?<=\D)\d{1,3}(?=.*\.)|xl',name)
-        abridgedname = segments.pop(0).title()
-        for segment in set(segments):
-            abridgedname += "-"+segment.upper()
-        names.append(abridgedname)
-    new_name = f'{"~".join(names)}_{calcmode.replace(" ","-").upper()}x{alpha}'
-    return new_name
-        
-
-def save_loaded_model(name,settings):
-    if shared.sd_model.sd_checkpoint_info.short_title != hash(cmn.last_merge_tasks):
-        gr.Warning('Loaded model is not a unsaved merged model.')
-        return
-
-    sd_unet.apply_unet("None")
-    sd_hijack.model_hijack.undo_hijack(shared.sd_model)
-
-    with torch.no_grad():
-        for module in shared.sd_model.modules():
-            networks.network_restore_weights_from_backup(module)
-
-    state_dict = shared.sd_model.state_dict()
-
-    name = name or shared.sd_model.sd_checkpoint_info.name_for_extra.replace('_TEMP_MERGE_','')
-
-    checkpoint_info = save_state_dict(state_dict,name,settings)
-    shared.sd_model.sd_checkpoint_info = checkpoint_info
-    shared.sd_model_file = checkpoint_info.filename
-    return 'Model saved as: '+checkpoint_info.filename
-
-
-def save_state_dict(state_dict,name,settings,timer=None):
-    global recently_saved
-    fileext = ".fp16.safetensors" if 'fp16' in settings else '.safetensors'
-
-    filename_no_ext = os.path.join(paths_internal.models_path,'Stable-diffusion',name)
-    try:
-        filename_no_ext = filename_no_ext[0:225]
-    except: pass
-
-    filename = filename_no_ext+fileext
-    if 'Overwrite' not in settings:
-        n = 1
-        while os.path.exists(filename):
-            filename = f"{filename_no_ext}_{n}{fileext}"
-            n+=1
-
-    if 'fp16' in settings:
-        for key,tensor in state_dict.items():
-            state_dict[key] = tensor.type(torch.float16)
-
-    try:
-        safetensors.torch.save_file(state_dict,filename)
-    except safetensors.SafetensorError:
-        print('Failed to save checkpoint. Applying contiguous to tensors and trying again...')
-        for key,tensor in state_dict.items():
-            state_dict[key] = tensor.contiguous()
-        safetensors.torch.save_file(state_dict,filename)
-
-    try:
-        timer.record('Save checkpoint')
-    except: pass
-
-    checkpoint_info = sd_models.CheckpointInfo(filename)
-    checkpoint_info.register()
-
-    """recently_saved.insert(0,recent_save_prefix+checkpoint_info.name)
-    try:
-        recently_saved = recently_saved[0:5]
-    except IndexError: pass"""
-    
-    gr.Info('Model saved as '+filename)
-    return checkpoint_info
 
 
 def change_preferred_device(input):
@@ -553,7 +336,7 @@ def checkpoint_changed(name):
 
 
 def calcmode_changed(calcmode_name):
-    calcmode = calcmode_selection[calcmode_name]
+    calcmode = merger.calcmode_selection[calcmode_name]
 
     slider_a_update = gr.update(
         minimum=calcmode.slid_a_config[0],
@@ -584,18 +367,6 @@ def calcmode_changed(calcmode_name):
     )
 
     return gr.update(info = calcmode.description),slider_a_update,slider_b_update,slider_c_update,slider_d_update
-
-
-class NoCaching:
-    def __init__(self):
-        self.cachebackup = None
-
-    def __enter__(self):
-        self.cachebackup = sd_models.checkpoints_loaded
-        sd_models.checkpoints_loaded = OrderedDict()
-
-    def __exit__(self, *args):
-        sd_models.checkpoints_loaded = self.cachebackup
 
 
 def refresh_models():

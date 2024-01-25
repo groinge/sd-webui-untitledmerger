@@ -2,5 +2,7 @@ Capable of reusing calculations from recent merges to greatly improve merge time
 
 Note:
 - Only supports safetensors.
+- Developed for webui 1.7.0 dev branch
+- I'm currently focusing on 1.5 merging. XL merging generally works but there may be issues.
 
 Inspired by and uses snippets from: https://github.com/hako-mikan/sd-webui-supermerger 🙏🙏🙏
