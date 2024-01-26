@@ -151,9 +151,6 @@ def save_loaded_model(name,settings):
     return 'Model saved as: '+checkpoint_info.filename
 
 
-recently_saved = []
-recent_save_prefix = '[Recent save] '
-
 def save_state_dict(state_dict,name,settings,timer=None):
     global recently_saved
     fileext = ".fp16.safetensors" if 'fp16' in settings else '.safetensors'
@@ -188,11 +185,6 @@ def save_state_dict(state_dict,name,settings,timer=None):
 
     checkpoint_info = sd_models.CheckpointInfo(filename)
     checkpoint_info.register()
-
-    """recently_saved.insert(0,recent_save_prefix+checkpoint_info.name)
-    try:
-        recently_saved = recently_saved[0:5]
-    except IndexError: pass"""
     
     gr.Info('Model saved as '+filename)
     return checkpoint_info
@@ -256,3 +248,4 @@ def image_gen(task_id,promptbox,negative_promptbox,steps,sampler_name,width,heig
 
     shared.total_tqdm.clear()
     return processed.images, ui_common.plaintext_to_html('\n'.join(processed.infotexts)), ui_common.plaintext_to_html(processed.comments)
+

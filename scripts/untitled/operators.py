@@ -1,5 +1,7 @@
 import torch,scipy,cachetools
 import scripts.untitled.common as cmn
+import torch.nn.functional as F
+import numpy as np
 
 
 #Wrappers
@@ -125,7 +127,7 @@ class TrainDiff(Operation):
         return new_diff.to(cmn.precision)  *1.8
         
 
-class ExtractRelative(Operation):
+class Extract(Operation):
     def __init__(self,key,alpha,beta,gamma,*args):
         super().__init__(key,*args)
         self.alpha = alpha
@@ -149,13 +151,56 @@ class ExtractRelative(Operation):
         return result.to(dtype)
     
 
-class Extract(ExtractRelative):
+class Similarities(Extract):
     def __init__(self,*args):
         super().__init__(*args)
 
     def oper(self, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
         return super().oper(None,a,b)
+
+
+class PowerUp(Operation):
+    def __init__(self,key,alpha,*sources):
+        super().__init__(key,*sources)
+        self.alpha = alpha
+
+    #https://github.com/martyn/safetensors-merge-supermario/blob/main/merge.py
+    #https://arxiv.org/pdf/2311.03099.pdf
+    #https://github.com/yule-BUAA/MergeLM/tree/main/model_merging_methods
+    def oper(self, a, b):
+        # Calculate the delta of the weights
+        a, b = resize_tensors(a, b)
+        delta = b - a
+        # Generate the mask m^t from Bernoulli distribution
+        m = torch.from_numpy(np.random.binomial(1, self.alpha, delta.shape)).to(cmn.device).type(cmn.precision)
+        # Apply the mask to the delta to get δ̃^t
+        delta_tilde = m * delta
+        # Scale the masked delta by the dropout rate to get δ̂^t
+        delta_hat = delta_tilde / (1 - self.alpha)
+        return delta_hat
     
+
+def resize_tensors(tensor1, tensor2):
+    if len(tensor1.shape) not in [1, 2]:
+        return tensor1, tensor2
+
+    # Pad along the last dimension (width)
+    if tensor1.shape[-1] < tensor2.shape[-1]:
+        padding_size = tensor2.shape[-1] - tensor1.shape[-1]
+        tensor1 = F.pad(tensor1, (0, padding_size, 0, 0))
+    elif tensor2.shape[-1] < tensor1.shape[-1]:
+        padding_size = tensor1.shape[-1] - tensor2.shape[-1]
+        tensor2 = F.pad(tensor2, (0, padding_size, 0, 0))
+
+    # Pad along the first dimension (height)
+    if tensor1.shape[0] < tensor2.shape[0]:
+        padding_size = tensor2.shape[0] - tensor1.shape[0]
+        tensor1 = F.pad(tensor1, (0, 0, 0, padding_size))
+    elif tensor2.shape[0] < tensor1.shape[0]:
+        padding_size = tensor1.shape[0] - tensor2.shape[0]
+        tensor2 = F.pad(tensor2, (0, 0, 0, padding_size))
+
+    return tensor1, tensor2
 
 #The cache
 class WeightsCache(cachetools.LRUCache):
@@ -171,3 +216,5 @@ class WeightsCache(cachetools.LRUCache):
         return res.clone().to(cmn.device).type(cmn.precision)
 
 weights_cache = WeightsCache(cmn.cache_size)
+
+

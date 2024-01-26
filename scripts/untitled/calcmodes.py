@@ -127,7 +127,7 @@ class Extract(CalcMode):
         b = opr.LoadTensor(key,model_b)
         c = opr.LoadTensor(key,model_c)
 
-        extracted = opr.ExtractRelative(key, alpha, beta, gamma*15, a, b, c)
+        extracted = opr.Extract(key, alpha, beta, gamma*15, a, b, c)
         if smooth:
             extracted = opr.Smooth(key, extracted)
         extracted.cache()
@@ -160,7 +160,7 @@ class AddDisimilarity(CalcMode):
         b = opr.LoadTensor(key,model_b)
         c = opr.LoadTensor(key,model_c)
 
-        extracted = opr.Extract(key, alpha, 1, gamma*15, b, c)
+        extracted = opr.Similarities(key, alpha, 1, gamma*15, b, c)
         if smooth:
             extracted = opr.Smooth(key, extracted)
         extracted.cache()
@@ -172,5 +172,28 @@ class AddDisimilarity(CalcMode):
     
 CALCMODES_LIST.append(AddDisimilarity)
         
+class PowerUp(CalcMode):
+    name = 'Power-up'
+    description = 'idk math or something, dont ask me im a dunce'
+    input_models = 2
+    input_sliders = 2
+    slid_a_info = "dropout rate"
+    slid_a_config = (0, 2, 0.01)
+    slid_b_info = "addition multiplier"
 
+    def create_recipe(key, model_a, model_b, model_c, alpha=0, beta=0,smooth=0, **kwargs):
+        a = opr.LoadTensor(key,model_a)
+        b = opr.LoadTensor(key,model_b)
+
+        deltahat = opr.PowerUp(key, alpha, a, b)
+        if smooth:
+            deltahat = opr.Smooth(key,deltahat)
+        deltahat.cache()
+
+        res = opr.Multiply(key, beta, deltahat)
+
+        return opr.Add(key, a, res)
+
+        
+CALCMODES_LIST.append(PowerUp)
 

@@ -6,6 +6,8 @@ threads = 12
 device = devices.get_optimal_device_name()
 precision = float16
 
+blocks = None
+
 #Size in bytes
 cache_size = 1024*1024*1024*4
 

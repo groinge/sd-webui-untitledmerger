@@ -1,12 +1,11 @@
 import gradio as gr
-import os,re,functools
+import os,re,functools,json
 import torch,safetensors,safetensors.torch
 from modules import sd_models,script_callbacks,scripts,shared,ui_components,paths,sd_samplers,ui,call_queue
 from modules.ui_common import create_output_panel,plaintext_to_html
 from modules.ui import create_sampler_and_steps_selection
 from scripts.untitled import merger,misc_util
 import scripts.untitled.common as cmn
-from copy import deepcopy
 
 checkpoints_no_pickles = lambda: [checkpoint for checkpoint in sd_models.checkpoint_tiles() if checkpoint.split(' ')[0].endswith('.safetensors')]
 
@@ -22,7 +21,7 @@ with open(ext2abs('scripts','examplemerge.yaml'), 'r') as file:
 model_a_keys = []
 
 def on_ui_tabs():
-    with gr.Blocks() as blocksui:
+    with gr.Blocks() as cmn.blocks:
         dummy_component = gr.Textbox(visible=False,interactive=True)
         with ui_components.ResizeHandleRow():
             with gr.Column():
@@ -84,11 +83,15 @@ def on_ui_tabs():
                         merge_and_gen_button = gr.Button(value='Merge & Gen',variant='primary')
                         with gr.Row():
                             empty_cache_button = gr.Button(value='Empty Cache')
-                            stop_button = gr.Button(value='Stop merge')
-
                             empty_cache_button.click(fn=merger.clear_cache,outputs=status)
+
+                            stop_button = gr.Button(value='Stop merge')
                             def stopfunc(): cmn.stop = True
                             stop_button.click(fn=stopfunc)
+
+                    """with gr.Row():
+                        save_state_button = gr.Button(value='Save State',variant='primary')
+                        load_state_button = gr.Button(value='Load State',variant='primary')"""
 
                 with gr.Accordion(label='Include/Exclude/Discard',open=False):
                     with gr.Row():
@@ -96,6 +99,32 @@ def on_ui_tabs():
                             clude = gr.Textbox(max_lines=4,label='Include/Exclude:',info='Entered targets will remain as model_a when set to \'Exclude\', and will be the only ones to be merged if set to \'Include\'. Separate with withspace.',value='first_stage_model',lines=4,scale=4)
                             clude_mode = gr.Radio(label="",info="",choices=["Exclude",("Include exclusively",'include')],value='Exclude',min_width=300,scale=1)
                         discard = gr.Textbox(max_lines=5,label='Discard:',info="Targets will be removed from the model, separate with whitespace.",value='model_ema',lines=5,scale=1)
+                    
+                """ with gr.Accordion(label='Custom sliders'):
+                    slider_slider = gr.Slider(step=2,maximum=26)
+                    unrendered_sliders = []
+                    for i in range(0,26):
+                        unrendered_sliders.append(gr.Textbox(render=False,label="",visible=True,min_width=100,scale=1,lines=1,max_lines=1))
+                        unrendered_sliders.append(gr.Slider(render=False,label="",scale=6,lines=1,max_lines=1,minimum=-1,maximum=2,step=0.01))
+                    
+                    custom_sliders = []
+                    with gr.Row():
+                        for w in [6,1,6]:
+                            with gr.Column(scale=w,min_width=0):
+                                if w>1:
+                                    for i in range(13):
+                                        with gr.Row(variant='compact'):
+                                            for x in (0,0):
+                                                component = unrendered_sliders.pop(0)
+                                                component.render()
+                                                custom_sliders.append(component)
+
+                    def show_sliders(n):
+                        return [gr.update(visible=True), gr.update(visible=True)]*n + [gr.update(visible=False), gr.update(visible=False)]*(26-n)
+                    
+                    slider_slider.release(fn=show_sliders,inputs=slider_slider,outputs=custom_sliders,show_progress='hidden')"""
+
+                    
                     
                 with gr.Accordion("Supermerger Adjust", open=False) as acc_ad:
                     with gr.Row(variant="compact"):
@@ -237,8 +266,6 @@ def on_ui_tabs():
                     target_tester.change(fn=test_regex,inputs=[target_tester],outputs=target_tester_display,show_progress='minimal')
 
 
-            
-
             merge_args = [
                 mode_selector,
                 model_a,
@@ -279,6 +306,7 @@ def on_ui_tabs():
                 hr_resize_y
             ]
 
+
             merge_button.click(fn=merger.start_merge,inputs=merge_args,outputs=status)
 
             def merge_interrupted(func):
@@ -296,18 +324,18 @@ def on_ui_tabs():
                                         fn=merge_interrupted(call_queue.wrap_gradio_gpu_call(misc_util.image_gen, extra_outputs=[None, '', ''])),
                                         _js='submit_imagegen',
                                         inputs=gen_args,
-                                        outputs=[output_panel.gallery,infotext,output_panel.html_log]
-                                        
+                                        outputs=[output_panel.gallery,infotext,output_panel.html_log]                     
             )
+
             gen_button.click(fn=call_queue.wrap_gradio_gpu_call(misc_util.image_gen, extra_outputs=[None, '', '']),
                             _js='submit_imagegen',
                             inputs=gen_args,
                             outputs=[output_panel.gallery,infotext,output_panel.html_log])
 
-    return [(blocksui, "Untitled merger", "untitled_merger")]
+
+    return [(cmn.blocks, "Untitled merger", "untitled_merger")]
 
 script_callbacks.on_ui_tabs(on_ui_tabs)
-
 
 def test_regex(input):
     regex = misc_util.target_to_regex(input)
