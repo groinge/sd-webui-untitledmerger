@@ -37,12 +37,25 @@ calcmode_selection = {}
 for calcmode in calcmodes.CALCMODES_LIST:
     calcmode_selection.update({calcmode.name: calcmode})
 
-def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,slider_d,editor,save_name,save_settings,discard,clude,clude_mode,smooth,finetune):
+def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,slider_d,editor,save_name,save_settings,discard,clude,clude_mode,smooth,finetune,enable_sliders,active_sliders,*custom_sliders):
     calcmode = calcmode_selection[calcmode]
     timer = Timer()
     cmn.interrupted = True
     cmn.stop = False
+    parsed_targets = {}
 
+    if enable_sliders:
+        slider_col_a = custom_sliders[:int(len(custom_sliders)/2)]
+        slider_col_b = custom_sliders[int(len(custom_sliders)/2):]
+
+        enabled_sliders = slider_col_a[:active_sliders] + slider_col_b[:active_sliders]
+        it = iter(enabled_sliders)
+        parsed_sliders = {it.__next__():{'alpha':it.__next__(),'smooth':smooth} for x in range(0,active_sliders)}
+        parsed_targets.update(parsed_sliders)
+        try:
+            del parsed_targets['']
+        except KeyError: pass
+        
     targets = re.sub(r'#.*$','',editor.lower(),flags=re.M)
     targets = re.sub(r'\bslider_a\b',str(slider_a),targets,flags=re.M)
     targets = re.sub(r'\bslider_b\b',str(slider_b),targets,flags=re.M)
@@ -50,7 +63,6 @@ def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,slid
     targets = re.sub(r'\bslider_d\b',str(slider_d),targets,flags=re.M)
 
     targets_list = targets.split('\n')
-    parsed_targets = {}
     for target in targets_list:
         if target != "":
             target = re.sub(r'\s+','',target)

@@ -1,8 +1,8 @@
 import gradio as gr
-import os,re,functools,json
+import os,re,functools,json,shutil
 import torch,safetensors,safetensors.torch
 from modules import sd_models,script_callbacks,scripts,shared,ui_components,paths,sd_samplers,ui,call_queue
-from modules.ui_common import create_output_panel,plaintext_to_html
+from modules.ui_common import create_output_panel,plaintext_to_html, create_refresh_button
 from modules.ui import create_sampler_and_steps_selection
 from scripts.untitled import merger,misc_util
 import scripts.untitled.common as cmn
@@ -14,7 +14,11 @@ extension_path = scripts.basedir()
 ext2abs = lambda *x: os.path.join(extension_path,*x)
 
 sd_checkpoints_path = os.path.join(paths.models_path,'Stable-diffusion')
-        
+
+custom_sliders_examples = ext2abs('scripts','untitled','sliders_examples.json')
+custom_sliders_presets = ext2abs('scripts','untitled','custom_sliders_presets.json')
+loaded_slider_presets = None
+
 with open(ext2abs('scripts','examplemerge.yaml'), 'r') as file:
     EXAMPLE = file.read()
 
@@ -69,6 +73,8 @@ def on_ui_tabs():
 
                 mode_selector.change(fn=calcmode_changed, inputs=[mode_selector], outputs=[mode_selector,alpha,beta,gamma,delta],show_progress='hidden')
 
+
+                ### SAVING
                 with gr.Row(equal_height=True):
                     with gr.Column(variant='panel'):
                         save_name = gr.Textbox(max_lines=1,label='Save checkpoint as:',lines=1,placeholder='Enter name...',scale=2)
@@ -77,8 +83,8 @@ def on_ui_tabs():
                             save_loaded = gr.Button(value='Save loaded checkpoint',size='sm',scale=1)
                             save_loaded.click(fn=misc_util.save_loaded_model, inputs=[save_name,save_settings],outputs=status).then(fn=refresh_models,outputs=[model_a,model_b,model_c])
 
+                #### MERGE BUTTONS
                     with gr.Column():
-                        #### MERGE BUTTONS
                         merge_button = gr.Button(value='Merge',variant='primary')
                         merge_and_gen_button = gr.Button(value='Merge & Gen',variant='primary')
                         with gr.Row():
@@ -89,10 +95,7 @@ def on_ui_tabs():
                             def stopfunc(): cmn.stop = True
                             stop_button.click(fn=stopfunc)
 
-                    """with gr.Row():
-                        save_state_button = gr.Button(value='Save State',variant='primary')
-                        load_state_button = gr.Button(value='Load State',variant='primary')"""
-
+                ### INCLUDE EXCLUDE
                 with gr.Accordion(label='Include/Exclude/Discard',open=False):
                     with gr.Row():
                         with gr.Column():
@@ -100,12 +103,25 @@ def on_ui_tabs():
                             clude_mode = gr.Radio(label="",info="",choices=["Exclude",("Include exclusively",'include')],value='Exclude',min_width=300,scale=1)
                         discard = gr.Textbox(max_lines=5,label='Discard:',info="Targets will be removed from the model, separate with whitespace.",value='model_ema',lines=5,scale=1)
                     
-                """ with gr.Accordion(label='Custom sliders'):
-                    slider_slider = gr.Slider(step=2,maximum=26)
-                    unrendered_sliders = []
-                    for i in range(0,26):
-                        unrendered_sliders.append(gr.Textbox(render=False,label="",visible=True,min_width=100,scale=1,lines=1,max_lines=1))
-                        unrendered_sliders.append(gr.Slider(render=False,label="",scale=6,lines=1,max_lines=1,minimum=-1,maximum=2,step=0.01))
+
+                ### CUSTOM SLIDERS
+                with ui_components.InputAccordion(False, label='Custom sliders') as enable_sliders:
+                    
+                    with gr.Accordion(label = 'Presets'):
+                        with gr.Row(variant='compact'):
+                            sliders_preset_dropdown = gr.Dropdown(label='Preset Name',allow_custom_value=True,choices=get_slider_presets(),value='blocks',scale=4)
+
+                            slider_refresh_button = gr.Button(value='🔄', elem_classes=["tool"],scale=1,min_width=40)
+                            slider_refresh_button.click(fn=lambda:gr.update(choices=get_slider_presets()),outputs=sliders_preset_dropdown)
+
+                            sliders_preset_load = gr.Button(variant='secondary',value='Load presets',scale=2)
+                            sliders_preset_save = gr.Button(variant='secondary',value='Save sliders as preset',scale=2)
+                    
+                        with open(custom_sliders_examples,'r') as file:
+                            presets = json.load(file)
+                        slid_defaults = iter(presets['blocks'])
+
+                        slider_slider = gr.Slider(step=2,maximum=26,value=slid_defaults.__next__(),label='Enabled Sliders')
                     
                     custom_sliders = []
                     with gr.Row():
@@ -114,18 +130,21 @@ def on_ui_tabs():
                                 if w>1:
                                     for i in range(13):
                                         with gr.Row(variant='compact'):
-                                            for x in (0,0):
-                                                component = unrendered_sliders.pop(0)
-                                                component.render()
-                                                custom_sliders.append(component)
+                                            custom_sliders.append(gr.Textbox(show_label=False,visible=True,value=slid_defaults.__next__(),placeholder='target',min_width=100,scale=1,lines=1,max_lines=1))
+                                            custom_sliders.append(gr.Slider(show_label=False,value=slid_defaults.__next__(),scale=6,minimum=0,maximum=1,step=0.01))
 
                     def show_sliders(n):
-                        return [gr.update(visible=True), gr.update(visible=True)]*n + [gr.update(visible=False), gr.update(visible=False)]*(26-n)
+                        n = int(n/2)
+                        update_column = [gr.update(visible=True), gr.update(visible=True)]*n + [gr.update(visible=False), gr.update(visible=False)]*(13-n)
+                        return update_column * 2
                     
-                    slider_slider.release(fn=show_sliders,inputs=slider_slider,outputs=custom_sliders,show_progress='hidden')"""
+                    slider_slider.change(fn=show_sliders,inputs=slider_slider,outputs=custom_sliders,show_progress='hidden')
+                    slider_slider.release(fn=show_sliders,inputs=slider_slider,outputs=custom_sliders,show_progress='hidden')
 
-                    
-                    
+                    sliders_preset_save.click(fn=save_custom_sliders,inputs=[sliders_preset_dropdown,slider_slider,*custom_sliders])
+                    sliders_preset_load.click(fn=load_slider_preset,inputs=[sliders_preset_dropdown],outputs=[slider_slider,*custom_sliders])
+
+                ### ADJUST
                 with gr.Accordion("Supermerger Adjust", open=False) as acc_ad:
                     with gr.Row(variant="compact"):
                         finetune = gr.Textbox(label="Adjust", show_label=False, info="Adjust IN,OUT,OUT2,Contrast,Brightness,COL1,COL2,COL3", visible=True, value="", lines=1)
@@ -266,7 +285,7 @@ def on_ui_tabs():
                             )
 
                 with gr.Tab(label='Model keys'):
-                    target_tester = gr.Textbox(max_lines=1,label="",info="",interactive=True,placeholder='out.4.tran.norm.weight')
+                    target_tester = gr.Textbox(max_lines=1,show_label=False,info="",interactive=True,placeholder='out.4.tran.norm.weight')
                     target_tester_display = gr.Textbox(max_lines=40,lines=40,label="Targeted keys:",info="",interactive=False)
                     target_tester.change(fn=test_regex,inputs=[target_tester],outputs=target_tester_display,show_progress='minimal')
 
@@ -287,7 +306,10 @@ def on_ui_tabs():
                 clude,
                 clude_mode,
                 smooth,
-                finetune
+                finetune,
+                enable_sliders,
+                slider_slider,
+                *custom_sliders
                 ]
             
             gen_args = [
@@ -310,7 +332,6 @@ def on_ui_tabs():
                 hr_resize_x,
                 hr_resize_y
             ]
-
 
             merge_button.click(fn=merger.start_merge,inputs=merge_args,outputs=status)
 
@@ -409,3 +430,32 @@ def refresh_models():
     sd_models.list_models()
     checkpoints_list = checkpoints_no_pickles()
     return gr.update(choices=checkpoints_list),gr.update(choices=checkpoints_list),gr.update(choices=checkpoints_list)
+
+### CUSTOM SLIDER FUNCS
+def save_custom_sliders(name,*sliders):
+    new_preset = {name:sliders}
+    with open(custom_sliders_presets,'r') as file:
+        sliders_presets = json.load(file)
+
+    sliders_presets .update(new_preset)
+
+    with open(custom_sliders_presets,'w') as file:
+            json.dump(sliders_presets,file,indent=0)
+    gr.Info('Preset saved')
+
+
+def get_slider_presets():
+    global loaded_slider_presets
+    try:
+        with open(custom_sliders_presets,'r') as file:
+            loaded_slider_presets = json.load(file)
+    except FileNotFoundError:
+        shutil.copy(custom_sliders_examples,custom_sliders_presets)
+        with open(custom_sliders_presets,'r') as file:
+            loaded_slider_presets = json.load(file)
+
+    return sorted(list(loaded_slider_presets.keys()))
+
+def load_slider_preset(name):
+    preset = loaded_slider_presets[name]
+    return [gr.update(value=x) for x in preset]
