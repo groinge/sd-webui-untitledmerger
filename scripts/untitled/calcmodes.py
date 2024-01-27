@@ -57,7 +57,7 @@ class AddDifference(CalcMode):
     description = 'model_a + (model_b - model_c) * alpha'
     input_models = 3
     input_sliders = 1
-    slid_a_info = "alpha"
+    slid_a_info = "addition multiplier"
     slid_a_config = (-1, 2, 0.01)
 
     def create_recipe(key, model_a, model_b, model_c, alpha=0, smooth=False, **kwargs):
@@ -83,7 +83,7 @@ class TrainDifference(CalcMode):
     description = 'model_a + (model_b - model_c) * alpha'
     input_models = 3
     input_sliders = 1
-    slid_a_info = "alpha"
+    slid_a_info = "addition multiplier"
     slid_a_config = (-1, 2, 0.01)
 
     def create_recipe(key, model_a, model_b, model_c, alpha=0, smooth=False, **kwargs):
@@ -178,7 +178,7 @@ class PowerUp(CalcMode):
     input_models = 2
     input_sliders = 2
     slid_a_info = "dropout rate"
-    slid_a_config = (0, 2, 0.01)
+    slid_a_config = (0, 1, 0.01)
     slid_b_info = "addition multiplier"
 
     def create_recipe(key, model_a, model_b, model_c, alpha=0, beta=0,smooth=0, **kwargs):

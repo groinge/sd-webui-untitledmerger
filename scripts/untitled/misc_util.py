@@ -120,7 +120,7 @@ def create_name(checkpoints,calcmode,alpha):
     except:pass
     for filename in checkpoints:
         name = os.path.basename(os.path.splitext(filename)[0]).lower()
-        segments = re.findall(r'^.{0,10}|[ev]\d{1,3}|(?<=\D)\d{1,3}(?=.*\.)|xl',name)
+        segments = re.findall(r'^.{0,10}|[ev]\d{1,3}|(?<=\D)\d{1,3}(?=.*\.)|xl',name) #Awful
         abridgedname = segments.pop(0).title()
         for segment in set(segments):
             abridgedname += "-"+segment.upper()

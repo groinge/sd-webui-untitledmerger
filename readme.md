@@ -6,3 +6,13 @@ Note:
 - I'm currently focusing on 1.5 merging. XL merging generally works but there may be issues.
 
 Inspired by and uses snippets from: https://github.com/hako-mikan/sd-webui-supermerger 🙏🙏🙏
+
+Power-Up merge from:
+    https://github.com/martyn/safetensors-merge-supermario
+    https://github.com/yule-BUAA/MergeLM
+
+To do:
+- XYZ plotting
+- State saving
+- History
+- Weight sliders

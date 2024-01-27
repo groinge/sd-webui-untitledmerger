@@ -198,7 +198,12 @@ def on_ui_tabs():
                     weight_editor = gr.Code(value=EXAMPLE,lines=20,language='yaml',label='')
                 with gr.Tab(label='Image gen'):
                     with gr.Column(variant='panel'):
-                        output_panel = create_output_panel('untitled_merger', shared.opts.outdir_txt2img_samples)
+                        try:
+                            output_panel = create_output_panel('untitled_merger', shared.opts.outdir_txt2img_samples)
+                            output_gallery, output_html_log = output_panel.gallery, output_panel.html_log
+                        except: #for compatibiltiy with webui 1.7.0 and older
+                            output_gallery, _, _, output_html_log = create_output_panel('untitled_merger', shared.opts.outdir_txt2img_samples)
+
                         with gr.Row(equal_height=False):
                             with gr.Accordion('Generation info',open=False,scale=3):
                                 infotext = gr.HTML(elem_id=f'html_info_{gen_elem_id}', elem_classes="infotext",scale=3)
@@ -324,13 +329,13 @@ def on_ui_tabs():
                                         fn=merge_interrupted(call_queue.wrap_gradio_gpu_call(misc_util.image_gen, extra_outputs=[None, '', ''])),
                                         _js='submit_imagegen',
                                         inputs=gen_args,
-                                        outputs=[output_panel.gallery,infotext,output_panel.html_log]                     
+                                        outputs=[output_gallery,infotext,output_html_log]                     
             )
 
             gen_button.click(fn=call_queue.wrap_gradio_gpu_call(misc_util.image_gen, extra_outputs=[None, '', '']),
                             _js='submit_imagegen',
                             inputs=gen_args,
-                            outputs=[output_panel.gallery,infotext,output_panel.html_log])
+                            outputs=[output_gallery,infotext,output_html_log])
 
 
     return [(cmn.blocks, "Untitled merger", "untitled_merger")]
