@@ -174,7 +174,7 @@ CALCMODES_LIST.append(AddDisimilarity)
         
 class PowerUp(CalcMode):
     name = 'Power-up'
-    description = 'idk math or something, dont ask me im a dunce'
+    description = 'Adds the capabilities of model B to model A\nNon-deterministic, press the clear cache button before generating to get a different result.'
     input_models = 2
     input_sliders = 2
     slid_a_info = "dropout rate"
