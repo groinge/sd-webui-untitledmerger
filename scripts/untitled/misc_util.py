@@ -3,6 +3,7 @@ import re,safetensors.torch,safetensors,torch,os,re
 from collections import OrderedDict
 from modules.timer import Timer
 from modules import sd_models,script_callbacks,shared,sd_unet,sd_hijack,sd_models_config,paths_internal,processing,script_loading,paths,ui_common
+from modules import sd_models,script_callbacks,shared,sd_unet,sd_hijack,sd_models_config,paths_internal,processing,script_loading,paths,ui_common,images
 
 import scripts.untitled.common as cmn
 
@@ -245,6 +246,9 @@ def image_gen(task_id,promptbox,negative_promptbox,steps,sampler_name,width,heig
     p.cached_hr_c = [None,None]
 
     processed = processing.process_images(p)
+
+    for i, image in enumerate(processed.images):
+        images.save_image(image, shared.opts.outdir_txt2img_samples,"",p.seed, p.prompt,shared.opts.samples_format,p=p,info=processed.infotexts[i])
 
     shared.total_tqdm.clear()
     return processed.images, ui_common.plaintext_to_html('\n'.join(processed.infotexts)), ui_common.plaintext_to_html(processed.comments)

@@ -285,10 +285,10 @@ class safe_open_multiple(object):
 
 def clear_cache():
     oper.weights_cache.__init__(cmn.cache_size)
-    last_merge_tasks = tuple()
     gc.collect()
     devices.torch_gc()
     torch.cuda.empty_cache()
+    cmn.last_merge_tasks = tuple() #Not a cache but benefits 
     return "All caches cleared"
 
 

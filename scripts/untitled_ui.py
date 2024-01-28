@@ -29,7 +29,7 @@ def on_ui_tabs():
         dummy_component = gr.Textbox(visible=False,interactive=True)
         with ui_components.ResizeHandleRow():
             with gr.Column():
-                status = gr.Textbox(max_lines=1,label="",info="",interactive=False,render=False)
+                status = gr.Textbox(max_lines=1,show_label=False,info="",interactive=False,render=False)
                 #### MODEL SELECTION
                 with gr.Row():
                     slider_scale = 5

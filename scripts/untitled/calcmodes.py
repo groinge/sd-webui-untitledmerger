@@ -173,13 +173,14 @@ class AddDisimilarity(CalcMode):
 CALCMODES_LIST.append(AddDisimilarity)
         
 class PowerUp(CalcMode):
-    name = 'Power-up'
-    description = 'Adds the capabilities of model B to model A\nNon-deterministic, press the clear cache button before generating to get a different result.'
+    name = 'Power-up (DARE)'
+    description = 'Adds the capabilities of model B to model A.  Non-deterministic, press the clear cache button before generating to get a different result.'
     input_models = 2
     input_sliders = 2
     slid_a_info = "dropout rate"
     slid_a_config = (0, 1, 0.01)
     slid_b_info = "addition multiplier"
+    slid_b_config = (-1, 4, 0.01)
 
     def create_recipe(key, model_a, model_b, model_c, alpha=0, beta=0,smooth=0, **kwargs):
         a = opr.LoadTensor(key,model_a)
