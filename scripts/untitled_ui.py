@@ -8,8 +8,6 @@ from scripts.untitled import merger,misc_util
 from scripts.untitled.operators import weights_cache
 import scripts.untitled.common as cmn
 
-checkpoints_no_pickles = lambda: [checkpoint for checkpoint in sd_models.checkpoint_tiles() if checkpoint.split(' ')[0].endswith('.safetensors')]
-
 extension_path = scripts.basedir()
 
 ext2abs = lambda *x: os.path.join(extension_path,*x)
@@ -48,7 +46,7 @@ class Options:
         return opt_component
     
     def __getitem__(self,key):
-        return self.options[key]
+        return self.options.get(key)
 
     def save(self):
         with open(self.filename,'w') as file:
@@ -69,21 +67,21 @@ def on_ui_tabs():
                     slider_scale = 5
                     with gr.Column(variant='compact',min_width=150,scale=slider_scale):
                         with gr.Row():
-                            model_a = gr.Dropdown(checkpoints_no_pickles(), label="model_a",scale=slider_scale)
+                            model_a = gr.Dropdown(get_checkpoints_list(), label="model_a",scale=slider_scale)
                             swap_models_AB = gr.Button(value='⇆', elem_classes=["tool"],scale=1)
                         model_a_info = gr.HTML(plaintext_to_html('None | None',classname='untitled_sd_version'))
                         model_a.change(fn=checkpoint_changed,inputs=model_a,outputs=model_a_info).then(fn=update_model_a_keys, inputs=model_a)
 
                     with gr.Column(variant='compact',min_width=150,scale=slider_scale):
                         with gr.Row():
-                            model_b = gr.Dropdown(checkpoints_no_pickles(), label="model_b",scale=slider_scale)
+                            model_b = gr.Dropdown(get_checkpoints_list(), label="model_b",scale=slider_scale)
                             swap_models_BC = gr.Button(value='⇆', elem_classes=["tool"],scale=1)
                         model_b_info = gr.HTML(plaintext_to_html('None | None',classname='untitled_sd_version'))
                         model_b.change(fn=checkpoint_changed,inputs=model_b,outputs=model_b_info)
 
                     with gr.Column(variant='compact',min_width=150,scale=slider_scale):
                         with gr.Row():
-                            model_c = gr.Dropdown(checkpoints_no_pickles(), label="model_c",scale=slider_scale)
+                            model_c = gr.Dropdown(get_checkpoints_list(), label="model_c",scale=slider_scale)
                             refresh_button = gr.Button(value='🔄', elem_classes=["tool"],scale=1)
                         model_c_info = gr.HTML(plaintext_to_html('None | None',classname='untitled_sd_version'))
                         model_c.change(fn=checkpoint_changed,inputs=model_c,outputs=model_c_info)
@@ -96,7 +94,7 @@ def on_ui_tabs():
                 #### MODE SELECTION
                 with gr.Row():
                     mode_selector = gr.Radio(label='Merge mode:',choices=list(merger.calcmode_selection.keys()),value=list(merger.calcmode_selection.keys())[0],scale=3)
-                    smooth = gr.Checkbox(label='Smooth Add',info='Filter additions to prevent burning at high weights',show_label=True,scale=1)
+                    smooth = gr.Checkbox(label='Smooth Add',info='Filter additions to prevent burning at high weights. (slow)',show_label=True,scale=1)
                 
                 ##### MAIN SLIDERS
                 with gr.Row(equal_height=True):
@@ -125,8 +123,8 @@ def on_ui_tabs():
                             empty_cache_button = gr.Button(value='Empty Cache')
                             empty_cache_button.click(fn=merger.clear_cache,outputs=status)
 
-                            stop_button = gr.Button(value='Stop merge')
-                            def stopfunc(): cmn.stop = True
+                            stop_button = gr.Button(value='Stop')
+                            def stopfunc(): cmn.stop = True;shared.state.interrupt()
                             stop_button.click(fn=stopfunc)
 
                 ### INCLUDE EXCLUDE
@@ -237,43 +235,48 @@ def on_ui_tabs():
                     col2.release(fn=finetune_update, inputs=[finetune, *finetunes], outputs=finetune, show_progress=False)
                     col3.release(fn=finetune_update, inputs=[finetune, *finetunes], outputs=finetune, show_progress=False)
 
-                with gr.Accordion(label='Options'):
-                    save_options_button = gr.Button(value = 'Save')
+                with gr.Accordion(label='Options',open=False):
+                    save_options_button = gr.Button(value = 'Save',variant='primary')
                     save_options_button.click(fn=cmn.opts.save)
+                    cmn.opts.create_option('checkpoint_sorting',
+                                        gr.Radio,
+                                        {'choices':['Alphabetical','Newest first'],
+                                            'label':'Checkpoints dropdown sorting:'},
+                                            default='Alphabetical')
 
                     cmn.opts.create_option('trash_model',
-                                           gr.Radio,
-                                           {'choices':['Disable','Enable for SDXL','Enable'],
-                                            'label':'Clear loaded SD models from memory at the start of merge',
+                                        gr.Radio,
+                                        {'choices':['Disable','Enable for SDXL','Enable'],
+                                            'label':'Clear loaded SD models from memory at the start of merge:',
                                             'info':'Saves some memory but increases loading times'},
                                             default='Enable for SDXL')
                     
                     cmn.opts.create_option('device',
-                                           gr.Radio,
-                                           {'choices':['cuda/float16', 'cuda/float32', 'cpu/float32'],
+                                        gr.Radio,
+                                        {'choices':['cuda/float16', 'cuda/float32', 'cpu/float32'],
                                             'label':'Preferred device/dtype for merging:'},
                                             default='cuda/float16')
 
                     cmn.opts.create_option('threads',
-                                           gr.Slider,
-                                           {'step':2,
+                                        gr.Slider,
+                                        {'step':2,
                                             'minimum':2,
                                             'maximum':10,
-                                            'label':'Worker thread count',
+                                            'label':'Worker thread count:',
                                             'info':'Relevant for both cuda and CPU merging. Using too many threads can harm performance. Your core-count +-2 is a good guideline.'},
                                             default=8)
                     
                     cache_size_slider = cmn.opts.create_option('cache_size',
-                                           gr.Slider,
-                                           {'step':128,
+                                        gr.Slider,
+                                        {'step':128,
                                             'minimum':0,
                                             'maximum':8192,
-                                            'label':'Cache size (MB)',
-                                            'info':'Stores the result of intermediate calculations, such as the delta between B and C in add-difference before its multiplied and add to A.'},
+                                            'label':'Cache size (MB):',
+                                            'info':'Stores the result of intermediate calculations, such as the delta between B and C in add-difference before its multiplied and added to A.'},
                                             default=4096)
-                    
-                    cache_size_slider.release(fn=lambda x: weights_cache.__init__(x),inputs=cache_size_slider)
-                    weights_cache.__init__(cmn.opts['cache_size'])
+                
+                cache_size_slider.release(fn=lambda x: weights_cache.__init__(x),inputs=cache_size_slider)
+                weights_cache.__init__(cmn.opts['cache_size'])
 
 
             gen_elem_id = 'untitled_merger'
@@ -320,11 +323,12 @@ def on_ui_tabs():
                         cfg_scale = gr.Slider(minimum=1.0, maximum=30.0, step=0.5, label='CFG Scale', value=7.0, elem_id=f"{gen_elem_id}_cfg_scale")
                         
                     with gr.Row():
-                        seed = gr.Number(label='Seed', value=1, elem_id=gen_elem_id+" seed", min_width=100, precision=0)
+                        seed = gr.Number(label='Seed', value=99, elem_id=gen_elem_id+" seed", min_width=100, precision=0)
 
                         random_seed = ui_components.ToolButton(ui.random_symbol, elem_id=gen_elem_id+" random_seed", tooltip="Set seed to -1, which will cause a new random number to be used every time")
-                        random_seed.click(fn=None, _js="function(){setRandomSeed('" + gen_elem_id+" seed" + "')}", show_progress=False, inputs=[], outputs=[])
-                        #reuse_seed = ui_components.ToolButton(ui.reuse_symbol, elem_id=gen_elem_id+" reuse_seed", tooltip="Reuse seed from last generation, mostly useful if it was randomized")
+                        random_seed.click(fn=lambda:-1, show_progress=False, outputs=seed)
+                        reuse_seed = ui_components.ToolButton(ui.reuse_symbol, elem_id=gen_elem_id+" reuse_seed", tooltip="Reuse seed from last generation, mostly useful if it was randomized")
+                        reuse_seed.click(fn=lambda:cmn.last_seed, show_progress=False, outputs=seed)
 
 
                     with ui_components.InputAccordion(False, label="Hires. fix", elem_id=f"{gen_elem_id}_hr") as enable_hr:
@@ -487,10 +491,20 @@ def calcmode_changed(calcmode_name):
     return gr.update(info = calcmode.description),slider_a_update,slider_b_update,slider_c_update,slider_d_update
 
 
+def get_checkpoints_list():
+    checkpoints_list = [checkpoint for checkpoint in sd_models.checkpoint_tiles() if checkpoint.split(' ')[0].endswith('.safetensors')]
+    if  cmn.opts['checkpoint_sorting'] == 'Newest first':
+        sort_func = lambda x: os.path.getctime(sd_models.get_closet_checkpoint_match(x).filename)
+        checkpoints_list.sort(key=sort_func,reverse=True)
+    return checkpoints_list
+
+
 def refresh_models():
     sd_models.list_models()
-    checkpoints_list = checkpoints_no_pickles()
+    checkpoints_list = get_checkpoints_list()
+    
     return gr.update(choices=checkpoints_list),gr.update(choices=checkpoints_list),gr.update(choices=checkpoints_list)
+
 
 ### CUSTOM SLIDER FUNCS
 def save_custom_sliders(name,*sliders):

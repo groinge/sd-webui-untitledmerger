@@ -2,11 +2,13 @@ import torch
 
 blocks = None
 opts = None
+last_seed = 5318008
 
 stop = False
 interrupted = False
 
 loaded_checkpoints = None
+checkpoints_types = None
 primary = ""
 
 last_merge_tasks = tuple()

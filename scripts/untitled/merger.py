@@ -122,7 +122,7 @@ def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,slid
 
 def prepare_merge(calcmode,targets,checkpoints,discard_targets,cludes,timer,finetune) -> dict:
     cmn.primary = checkpoints[0]
-    checkpoints_types = [mutil.id_checkpoint(checkpoint)[0] for checkpoint in checkpoints]
+    cmn.checkpoints_types = {checkpoint:mutil.id_checkpoint(checkpoint)[0] for checkpoint in checkpoints}
     
     with safe_open_multiple(checkpoints,device=cmn.device()) as cmn.loaded_checkpoints:
         state_dict_keys = cmn.loaded_checkpoints[cmn.primary].keys()
@@ -135,7 +135,7 @@ def prepare_merge(calcmode,targets,checkpoints,discard_targets,cludes,timer,fine
         if shared.sd_model and shared.sd_model.sd_checkpoint_info.short_title == hash(cmn.last_merge_tasks):
             state_dict,tasks = get_tensors_from_loaded_model(state_dict,tasks)
         
-        is_sdxl = any([type in checkpoints_types for type in ['SDXL','SDXL-refiner']])
+        is_sdxl = any([type in cmn.checkpoints_types.values() for type in ['SDXL','SDXL-refiner']])
         if ('SDXL' in cmn.opts['trash_model'] and is_sdxl) or cmn.opts['trash_model'] == 'Enable':
             while len(sd_models.model_data.loaded_sd_models) > 0:
                 model = sd_models.model_data.loaded_sd_models.pop()
@@ -169,7 +169,7 @@ def prepare_merge(calcmode,targets,checkpoints,discard_targets,cludes,timer,fine
     
     state_dict.update(dict(results))
 
-    fine = fineman(finetune, False)
+    fine = fineman(finetune, is_sdxl)
     if finetune:
         for key in FINETUNES:
             state_dict.get(key)
@@ -187,7 +187,6 @@ def prepare_merge(calcmode,targets,checkpoints,discard_targets,cludes,timer,fine
             
     timer.record('Merge')
     return state_dict
-
 
 def parse_recipe(calcmode,targets,keys,primary,discard,clude,checkpoints) -> list:
     cludemode = clude.pop(0)
@@ -221,8 +220,6 @@ def initialize_merge(task) -> tuple:
         tensor = task.merge()
     except SafetensorError: #Fallback in case one of the secondary models lack a key present in the primary model
         tensor = cmn.loaded_checkpoints[cmn.primary].get_tensor(task.key)
-    """except RuntimeError:
-        tensor = cmn.loaded_checkpoints[cmn.primary].get_tensor(task.key)"""
 
     #tensor = tensor.detach().cpu()
     devices.torch_gc()
@@ -350,3 +347,4 @@ FINETUNES = [
 "model.diffusion_model.out.2.weight",
 "model.diffusion_model.out.2.bias",
 ]
+

@@ -251,6 +251,7 @@ def image_gen(task_id,promptbox,negative_promptbox,steps,sampler_name,width,heig
         images.save_image(image, shared.opts.outdir_txt2img_samples,"",p.seed, p.prompt,shared.opts.samples_format,p=p,info=processed.infotexts[i])
 
     shared.total_tqdm.clear()
+    cmn.last_seed = processed.seed
     return processed.images, processed.infotexts, ui_common.plaintext_to_html(processed.comments)
 
 
