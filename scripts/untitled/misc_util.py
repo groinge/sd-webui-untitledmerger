@@ -1,8 +1,7 @@
 import gradio as gr
-import re,safetensors.torch,safetensors,torch,os,re
+import re,safetensors.torch,safetensors,torch,os,shutil
 from collections import OrderedDict
 from modules.timer import Timer
-from modules import sd_models,script_callbacks,shared,sd_unet,sd_hijack,sd_models_config,paths_internal,processing,script_loading,paths,ui_common
 from modules import sd_models,script_callbacks,shared,sd_unet,sd_hijack,sd_models_config,paths_internal,processing,script_loading,paths,ui_common,images
 
 import scripts.untitled.common as cmn
@@ -65,7 +64,8 @@ versions = {
 }
 
 def id_checkpoint(name):
-    filename = sd_models.get_closet_checkpoint_match(name).filename
+    if not name: return None,None
+    filename = name if os.path.exists(name) else sd_models.get_closet_checkpoint_match(name).filename
     with safetensors.torch.safe_open(filename,framework='pt',device='cpu') as st_file:
 
         def gettensor(key):
@@ -197,7 +197,7 @@ def load_merged_state_dict(state_dict,checkpoint_info):
     for key, weight in state_dict.items():
         state_dict[key] = weight.half()
 
-    if shared.sd_model.used_config == config:
+    if shared.sd_model and shared.sd_model.used_config == config:
         print('Loading weights using already loaded model...')
 
         load_timer = Timer()
@@ -251,5 +251,35 @@ def image_gen(task_id,promptbox,negative_promptbox,steps,sampler_name,width,heig
         images.save_image(image, shared.opts.outdir_txt2img_samples,"",p.seed, p.prompt,shared.opts.samples_format,p=p,info=processed.infotexts[i])
 
     shared.total_tqdm.clear()
-    return processed.images, ui_common.plaintext_to_html('\n'.join(processed.infotexts)), ui_common.plaintext_to_html(processed.comments)
+    return processed.images, processed.infotexts, ui_common.plaintext_to_html(processed.comments)
 
+
+def find_checkpoint_w_config(config_source, model_a, model_b, model_c):
+    a = sd_models.get_closet_checkpoint_match(model_a)
+    b = sd_models.get_closet_checkpoint_match(model_b)
+    c = sd_models.get_closet_checkpoint_match(model_c)
+
+    config = lambda x: x if sd_models_config.find_checkpoint_config_near_filename(x) else None
+
+    if config_source == 0:
+        return config(a) or config(b) or config(c) or a
+    elif config_source == 1:
+        return a
+    elif config_source == 2:
+        return b or a
+    else:
+        return c or a
+
+
+def copy_config(origin,target):
+    origin_config = sd_models_config.find_checkpoint_config_near_filename(origin)
+
+    if origin_config:
+        target_noext, _ = os.path.splitext(target)
+        new_config = target_noext + ".yaml"
+
+        if origin_config != new_config:
+            print("Copying config:")
+            print("   from:", origin_config)
+            print("     to:", new_config)
+            shutil.copyfile(origin_config, new_config)

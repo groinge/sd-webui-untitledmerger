@@ -5,6 +5,7 @@ from modules import sd_models,script_callbacks,scripts,shared,ui_components,path
 from modules.ui_common import create_output_panel,plaintext_to_html, create_refresh_button
 from modules.ui import create_sampler_and_steps_selection
 from scripts.untitled import merger,misc_util
+from scripts.untitled.operators import weights_cache
 import scripts.untitled.common as cmn
 
 checkpoints_no_pickles = lambda: [checkpoint for checkpoint in sd_models.checkpoint_tiles() if checkpoint.split(' ')[0].endswith('.safetensors')]
@@ -15,6 +16,8 @@ ext2abs = lambda *x: os.path.join(extension_path,*x)
 
 sd_checkpoints_path = os.path.join(paths.models_path,'Stable-diffusion')
 
+options_filename = ext2abs('scripts','untitled','options.json')
+
 custom_sliders_examples = ext2abs('scripts','untitled','sliders_examples.json')
 custom_sliders_presets = ext2abs('scripts','untitled','custom_sliders_presets.json')
 loaded_slider_presets = None
@@ -23,6 +26,37 @@ with open(ext2abs('scripts','examplemerge.yaml'), 'r') as file:
     EXAMPLE = file.read()
 
 model_a_keys = []
+
+
+class Options:
+    def __init__(self,filename):
+        self.filename = filename
+        try:
+            with open(filename,'r') as file:
+                self.options = json.load(file)
+        except FileNotFoundError:
+            self.options = dict()
+    
+    def create_option(self,key,component,component_kwargs,default):
+        value = self.options.get(key) or default
+
+        opt_component = component(value = value,**component_kwargs)
+        setattr(opt_component,"do_not_save_to_config",True)
+        self.options[key] = value
+        def opt_event(value): self.options[key] = value
+        opt_component.change(fn=opt_event, inputs=opt_component)
+        return opt_component
+    
+    def __getitem__(self,key):
+        return self.options[key]
+
+    def save(self):
+        with open(self.filename,'w') as file:
+            json.dump(self.options,file,indent=4)
+        gr.Info('Options saved')
+
+cmn.opts = Options(options_filename)
+
 
 def on_ui_tabs():
     with gr.Blocks() as cmn.blocks:
@@ -203,14 +237,49 @@ def on_ui_tabs():
                     col2.release(fn=finetune_update, inputs=[finetune, *finetunes], outputs=finetune, show_progress=False)
                     col3.release(fn=finetune_update, inputs=[finetune, *finetunes], outputs=finetune, show_progress=False)
 
-                with gr.Row(variant='panel'):
-                    device_selector = gr.Radio(label='Preferred device/dtype for merging:',info='',choices=['cuda/float16', 'cuda/float32', 'cpu/float32'],value = 'cuda/float16' )
-                    worker_count = gr.Slider(step=2,minimum=2,value=cmn.threads,maximum=16,label='Worker thread count:',info=('Relevant for both cuda and CPU merging. Using too many threads can harm performance.'))
-                    def worker_count_fn(x): cmn.threads = int(x)
-                    worker_count.release(fn=worker_count_fn,inputs=worker_count)
-                    device_selector.change(fn=change_preferred_device,inputs=device_selector)
+                with gr.Accordion(label='Options'):
+                    save_options_button = gr.Button(value = 'Save')
+                    save_options_button.click(fn=cmn.opts.save)
+
+                    cmn.opts.create_option('trash_model',
+                                           gr.Radio,
+                                           {'choices':['Disable','Enable for SDXL','Enable'],
+                                            'label':'Clear loaded SD models from memory at the start of merge',
+                                            'info':'Saves some memory but increases loading times'},
+                                            default='Enable for SDXL')
+                    
+                    cmn.opts.create_option('device',
+                                           gr.Radio,
+                                           {'choices':['cuda/float16', 'cuda/float32', 'cpu/float32'],
+                                            'label':'Preferred device/dtype for merging:'},
+                                            default='cuda/float16')
+
+                    cmn.opts.create_option('threads',
+                                           gr.Slider,
+                                           {'step':2,
+                                            'minimum':2,
+                                            'maximum':10,
+                                            'label':'Worker thread count',
+                                            'info':'Relevant for both cuda and CPU merging. Using too many threads can harm performance. Your core-count +-2 is a good guideline.'},
+                                            default=8)
+                    
+                    cache_size_slider = cmn.opts.create_option('cache_size',
+                                           gr.Slider,
+                                           {'step':128,
+                                            'minimum':0,
+                                            'maximum':8192,
+                                            'label':'Cache size (MB)',
+                                            'info':'Stores the result of intermediate calculations, such as the delta between B and C in add-difference before its multiplied and add to A.'},
+                                            default=4096)
+                    
+                    cache_size_slider.release(fn=lambda x: weights_cache.__init__(x),inputs=cache_size_slider)
+                    weights_cache.__init__(cmn.opts['cache_size'])
+
 
             gen_elem_id = 'untitled_merger'
+
+            #model_prefix = gr.Textbox(max_lines=1,lines=1,label='Prefix checkpoint filenames', info='Use / to save checkpoints to a subfolder.',placeholder='folder/merge_')
+
             with gr.Column():
                 status.render()
                 with gr.Accordion('Weight editor'):
@@ -377,14 +446,6 @@ def update_model_a_keys(model_a):
         model_a_keys = file.keys()
 
 
-def change_preferred_device(input):
-    cmn.device,dtype = input.split('/')
-                     
-    if dtype == 'float16': cmn.precision=torch.float16
-    elif dtype == 'float8': cmn.precision=torch.float8_e4m3fn
-    else: cmn.precision = torch.float32
-
-
 def checkpoint_changed(name):
     if name == "":
         return plaintext_to_html('None | None',classname='untitled_sd_version')
@@ -455,6 +516,7 @@ def get_slider_presets():
             loaded_slider_presets = json.load(file)
 
     return sorted(list(loaded_slider_presets.keys()))
+
 
 def load_slider_preset(name):
     preset = loaded_slider_presets[name]

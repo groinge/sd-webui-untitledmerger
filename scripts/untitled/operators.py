@@ -51,7 +51,8 @@ class Operation:
         return self.merge_func(self)
     
     def cache(self):
-        self.merge_func = cache_operation(recurse)
+        if cmn.opts['cache_size'] > 512:
+            self.merge_func = cache_operation(recurse)
         return self
         
 
@@ -62,7 +63,7 @@ class LoadTensor(Operation):
 
     #loadtensor uses merge instead of oper as it has no model inputs, use oper everywhere else 
     def merge(self) -> torch.Tensor:
-        return cmn.loaded_checkpoints[self.alpha].get_tensor(self.key).to(cmn.device)
+        return cmn.loaded_checkpoints[self.alpha].get_tensor(self.key).to(cmn.device())
 
 
 class Multiply(Operation):
@@ -100,7 +101,7 @@ class Smooth(Operation):
         filtered_diff = scipy.ndimage.median_filter(a.detach().cpu().to(torch.float32).numpy(), size=3)
         # Apply Gaussian filter to the filtered differences
         filtered_diff = scipy.ndimage.gaussian_filter(filtered_diff, sigma=1)
-        return torch.tensor(filtered_diff,dtype=cmn.precision,device=cmn.device)
+        return torch.tensor(filtered_diff,dtype=cmn.dtype(),device=cmn.device())
     
 
 class TrainDiff(Operation):
@@ -124,7 +125,7 @@ class TrainDiff(Operation):
         scale = sign_scale * torch.abs(scale)
 
         new_diff = scale * torch.abs(diff_AB)
-        return new_diff.to(cmn.precision)  *1.8
+        return new_diff.to(cmn.dtype())  *1.8
         
 
 class Extract(Operation):
@@ -170,9 +171,10 @@ class PowerUp(Operation):
     def oper(self, a, b):
         # Calculate the delta of the weights
         a, b = resize_tensors(a, b)
+
         delta = b - a
         # Generate the mask m^t from Bernoulli distribution
-        m = torch.from_numpy(np.random.binomial(1, self.alpha, delta.shape)).to(cmn.device).type(cmn.precision)
+        m = torch.from_numpy(np.random.binomial(1, self.alpha, delta.shape)).to(cmn.device()).type(cmn.dtype())
         # Apply the mask to the delta to get δ̃^t
         delta_tilde = m * delta
         # Scale the masked delta by the dropout rate to get δ̂^t
@@ -205,7 +207,7 @@ def resize_tensors(tensor1, tensor2):
 #The cache
 class WeightsCache(cachetools.LRUCache):
     def __init__(self, size):
-        super().__init__(size,lambda x: x.element_size() * x.nelement())
+        super().__init__(size*1024*1024,lambda x: x.element_size() * x.nelement())
 
     def __setitem__(self, key, value):
         value = value.detach().cpu()
@@ -213,8 +215,9 @@ class WeightsCache(cachetools.LRUCache):
 
     def __getitem__(self, key: Operation) -> torch.Tensor:
         res = super().__getitem__(key)
-        return res.clone().to(cmn.device).type(cmn.precision)
-
-weights_cache = WeightsCache(cmn.cache_size)
+        return res.clone().to(cmn.device()).type(cmn.dtype())
+    
+    
+weights_cache = WeightsCache(0)
 
 

@@ -88,13 +88,12 @@ def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,slid
     discards = re.findall(r'[^\s]+', discard, flags=re.I|re.M)
     cludes = [clude_mode.lower(),*re.findall(r'[^\s]+', clude, flags=re.I|re.M)]
 
-    sd_models.unload_model_weights(shared.sd_model)
-    sd_unet.apply_unet("None")
-    sd_hijack.model_hijack.undo_hijack(shared.sd_model)
-    devices.torch_gc()
+    if shared.sd_model:
+        sd_models.unload_model_weights(shared.sd_model)
+        sd_unet.apply_unet("None")
+        sd_hijack.model_hijack.undo_hijack(shared.sd_model)
 
     #Actual main merge process begins here:
-
     state_dict = prepare_merge(calcmode,parsed_targets,checkpoints,discards,cludes,timer,finetune)
     if not state_dict:
         return 'Merge Interrupted'
@@ -123,8 +122,9 @@ def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,slid
 
 def prepare_merge(calcmode,targets,checkpoints,discard_targets,cludes,timer,finetune) -> dict:
     cmn.primary = checkpoints[0]
+    checkpoints_types = [mutil.id_checkpoint(checkpoint)[0] for checkpoint in checkpoints]
     
-    with safe_open_multiple(checkpoints,device=cmn.device) as cmn.loaded_checkpoints:
+    with safe_open_multiple(checkpoints,device=cmn.device()) as cmn.loaded_checkpoints:
         state_dict_keys = cmn.loaded_checkpoints[cmn.primary].keys()
 
         tasks = parse_recipe(calcmode,targets,state_dict_keys,cmn.primary,discard_targets,cludes,checkpoints)
@@ -132,22 +132,30 @@ def prepare_merge(calcmode,targets,checkpoints,discard_targets,cludes,timer,fine
 
         state_dict = {}
         #Reuse merged tensors from the last merge's loaded model, if availible
-        if shared.sd_model.sd_checkpoint_info.short_title == hash(cmn.last_merge_tasks):
+        if shared.sd_model and shared.sd_model.sd_checkpoint_info.short_title == hash(cmn.last_merge_tasks):
             state_dict,tasks = get_tensors_from_loaded_model(state_dict,tasks)
         
-        if cmn.trash_model:
-            shared.sd_model.to(device='meta')
-            devices.torch_gc()
+        is_sdxl = any([type in checkpoints_types for type in ['SDXL','SDXL-refiner']])
+        if ('SDXL' in cmn.opts['trash_model'] and is_sdxl) or cmn.opts['trash_model'] == 'Enable':
+            while len(sd_models.model_data.loaded_sd_models) > 0:
+                model = sd_models.model_data.loaded_sd_models.pop()
+                sd_models.send_model_to_trash(model)
+            sd_models.model_data.sd_model = None
+            shared.sd_model = None
+        devices.torch_gc()
 
         timer.record('Prepare merge')
         try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=cmn.threads) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=cmn.opts['threads']) as executor:
                 futures = [executor.submit(initialize_merge, task) for task in tasks]
                 while True:
                     done, not_done = concurrent.futures.wait(futures,timeout=0.1)
                     if cmn.stop:
                         gr.Info('Stopping merge')
                         executor.shutdown(wait=False,cancel_futures=True)
+                        clear_cache()
+                        if not shared.sd_model:
+                            sd_models.reload_model_weights(forced_reload=True)
                         return None
                     
                     if len(not_done) == 0:
@@ -155,6 +163,8 @@ def prepare_merge(calcmode,targets,checkpoints,discard_targets,cludes,timer,fine
                         break
         except:
             clear_cache()
+            if not shared.sd_model:
+                sd_models.reload_model_weights(forced_reload=True)
             raise
     
     state_dict.update(dict(results))
@@ -211,6 +221,8 @@ def initialize_merge(task) -> tuple:
         tensor = task.merge()
     except SafetensorError: #Fallback in case one of the secondary models lack a key present in the primary model
         tensor = cmn.loaded_checkpoints[cmn.primary].get_tensor(task.key)
+    """except RuntimeError:
+        tensor = cmn.loaded_checkpoints[cmn.primary].get_tensor(task.key)"""
 
     #tensor = tensor.detach().cpu()
     devices.torch_gc()
@@ -284,7 +296,7 @@ class safe_open_multiple(object):
 
 
 def clear_cache():
-    oper.weights_cache.__init__(cmn.cache_size)
+    oper.weights_cache.__init__(cmn.opts['cache_size'])
     gc.collect()
     devices.torch_gc()
     torch.cuda.empty_cache()
