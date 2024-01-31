@@ -15,6 +15,9 @@ from modules import devices,shared,script_loading,paths,paths_internal,sd_models
 
 networks = script_loading.load_module(os.path.join(paths.extensions_builtin_dir,'Lora','networks.py'))
 
+class MergeInterruptedError(Exception):
+    def __init__(self,*args):
+        super().__init__(*args)
 
 SKIP_KEYS = [
     "alphas_cumprod",
@@ -34,14 +37,12 @@ SKIP_KEYS = [
 WEIGHT_NAMES = ('alpha','beta','gamma','delta')
 
 calcmode_selection = {}
-for calcmode in calcmodes.CALCMODES_LIST:
-    calcmode_selection.update({calcmode.name: calcmode})
+for calcmode_obj in calcmodes.CALCMODES_LIST:
+    calcmode_selection.update({calcmode_obj.name: calcmode_obj})
 
-def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,slider_d,editor,save_name,save_settings,discard,clude,clude_mode,smooth,finetune,enable_sliders,active_sliders,*custom_sliders):
-    calcmode = calcmode_selection[calcmode]
-    timer = Timer()
-    cmn.interrupted = True
-    cmn.stop = False
+
+def parse_arguments(progress,calcmode_name,model_a,model_b,model_c,slider_a,slider_b,slider_c,slider_d,editor,discard,clude,clude_mode,smooth,enable_sliders,active_sliders,*custom_sliders):
+    calcmode = calcmode_selection[calcmode_name]
     parsed_targets = {}
 
     if enable_sliders:
@@ -74,157 +75,43 @@ def start_merge(calcmode,model_a,model_b,model_c,slider_a,slider_b,slider_c,slid
                 except ValueError:pass
 
     checkpoints = []
+    progress('Using Checkpoints:')
     for n, model in enumerate((model_a,model_b,model_c)):
         if n+1 > calcmode.input_models:
-            checkpoints.append("")
+            checkpoints.append('')
             continue
         name = model.split(' ')[0]
         checkpoint_info = sd_models.get_closet_checkpoint_match(name)
-        if checkpoint_info == None: return 'Couldn\'t find checkpoint. '+name
-        if not checkpoint_info.filename.endswith('.safetensors'): return 'This extension only supports safetensors checkpoints: '+name
-        
+        if checkpoint_info == None: 
+            if model:
+                progress.interrupt('Couldn\'t find checkpoint: '+name)
+            else:
+                progress.interrupt('Missing input model')
+        if not checkpoint_info.filename.endswith('.safetensors'): 
+            progress.interrupt('This extension only supports safetensors checkpoints: '+name)
+        progress(' - '+name)
         checkpoints.append(checkpoint_info.filename)
+    cmn.primary = checkpoints[0]
 
     discards = re.findall(r'[^\s]+', discard, flags=re.I|re.M)
-    cludes = [clude_mode.lower(),*re.findall(r'[^\s]+', clude, flags=re.I|re.M)]
+    cludes = re.findall(r'[^\s]+', clude, flags=re.I|re.M)
 
-    if shared.sd_model:
-        sd_models.unload_model_weights(shared.sd_model)
-        sd_unet.apply_unet("None")
-        sd_hijack.model_hijack.undo_hijack(shared.sd_model)
+    with safe_open(cmn.primary,framework='pt',device='cpu') as file:
+        keys = file.keys()
 
-    #Actual main merge process begins here:
-    state_dict = prepare_merge(calcmode,parsed_targets,checkpoints,discards,cludes,timer,finetune)
-    if not state_dict:
-        return 'Merge Interrupted'
-
-    merge_name = mutil.create_name(checkpoints,calcmode.name,slider_a)
-
-    checkpoint_info = deepcopy(sd_models.get_closet_checkpoint_match(model_a))
-    checkpoint_info.short_title = hash(cmn.last_merge_tasks)
-    checkpoint_info.name_for_extra = '_TEMP_MERGE_'+merge_name
-
-    if 'Autosave' in save_settings:
-        checkpoint_info = mutil.save_state_dict(state_dict,save_name or merge_name,save_settings,timer)
-    
-    with mutil.NoCaching():
-        mutil.load_merged_state_dict(state_dict,checkpoint_info)
-    
-    timer.record('Load model')
-    del state_dict
-    devices.torch_gc()
-    cmn.interrupted = False
-    message = 'Merge completed in ' + timer.summary()
-    print(message)
-    
-    return message
-
-
-def prepare_merge(calcmode,targets,checkpoints,discard_targets,cludes,timer,finetune) -> dict:
-    cmn.primary = checkpoints[0]
-    cmn.checkpoints_types = {checkpoint:mutil.id_checkpoint(checkpoint)[0] for checkpoint in checkpoints}
-    
-    with safe_open_multiple(checkpoints,device=cmn.device()) as cmn.loaded_checkpoints:
-        state_dict_keys = cmn.loaded_checkpoints[cmn.primary].keys()
-
-        tasks = parse_recipe(calcmode,targets,state_dict_keys,cmn.primary,discard_targets,cludes,checkpoints)
-        tasks_copy = copy(tasks)
-
-        state_dict = {}
-        #Reuse merged tensors from the last merge's loaded model, if availible
-        if shared.sd_model and shared.sd_model.sd_checkpoint_info.short_title == hash(cmn.last_merge_tasks):
-            state_dict,tasks = get_tensors_from_loaded_model(state_dict,tasks)
-        
-        is_sdxl = any([type in cmn.checkpoints_types.values() for type in ['SDXL','SDXL-refiner']])
-        if ('SDXL' in cmn.opts['trash_model'] and is_sdxl) or cmn.opts['trash_model'] == 'Enable':
-            while len(sd_models.model_data.loaded_sd_models) > 0:
-                model = sd_models.model_data.loaded_sd_models.pop()
-                sd_models.send_model_to_trash(model)
-            sd_models.model_data.sd_model = None
-            shared.sd_model = None
-        devices.torch_gc()
-
-        timer.record('Prepare merge')
-        try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=cmn.opts['threads']) as executor:
-                futures = [executor.submit(initialize_merge, task) for task in tasks]
-                while True:
-                    done, not_done = concurrent.futures.wait(futures,timeout=0.1)
-                    if cmn.stop:
-                        gr.Info('Stopping merge')
-                        executor.shutdown(wait=False,cancel_futures=True)
-                        clear_cache()
-                        if not shared.sd_model:
-                            sd_models.reload_model_weights(forced_reload=True)
-                        return None
-                    
-                    if len(not_done) == 0:
-                        results = [future.result() for future in done]
-                        break
-        except:
-            clear_cache()
-            if not shared.sd_model:
-                sd_models.reload_model_weights(forced_reload=True)
-            raise
-    
-    state_dict.update(dict(results))
-
-    fine = fineman(finetune, is_sdxl)
-    if finetune:
-        for key in FINETUNES:
-            state_dict.get(key)
-            if key:
-                index = FINETUNES.index(key)
-                if 5 > index : 
-                    state_dict[key] = state_dict[key]* fine[index] 
-                else :state_dict[key] = state_dict[key] + torch.tensor(fine[5]).to(state_dict[key].device)
-                for task in tasks_copy:
-                    if task.key == key:
-                        tasks_copy.remove(task)
-
-
-    cmn.last_merge_tasks = tuple(tasks_copy)
-            
-    timer.record('Merge')
-    return state_dict
-
-def parse_recipe(calcmode,targets,keys,primary,discard,clude,checkpoints) -> list:
-    cludemode = clude.pop(0)
-    tasks = []
-    discard_regex = re.compile(mutil.target_to_regex(discard))
+    discard_regex = re.compile(mutil.target_to_regex(discards))
     discard_keys = list(filter(lambda x: re.search(discard_regex,x),keys))
 
     desired_keys = keys
-    if clude:
-        clude_regex = re.compile(mutil.target_to_regex(clude))
-        if cludemode == 'exclude':
+    if cludes:
+        clude_regex = re.compile(mutil.target_to_regex(cludes))
+        if clude_mode.lower() == 'exclude':
             desired_keys = list(filter(lambda x: not re.search(clude_regex,x),keys))
         else:
             desired_keys = list(filter(lambda x: re.search(clude_regex,x),keys))
 
-    assigned_keys = assign_weights_to_keys(targets,desired_keys)
-
-    for key in keys:
-        if key in discard_keys:continue
-        elif key in SKIP_KEYS or 'model_ema' in key:
-            tasks.append(oper.LoadTensor(key,primary))
-        elif key in assigned_keys.keys():
-            tasks.append(calcmode.create_recipe(key,*checkpoints,**assigned_keys[key]))
-        else: 
-            tasks.append(oper.LoadTensor(key,primary))
-    return tasks
-
-
-def initialize_merge(task) -> tuple:
-    try:
-        tensor = task.merge()
-    except SafetensorError: #Fallback in case one of the secondary models lack a key present in the primary model
-        tensor = cmn.loaded_checkpoints[cmn.primary].get_tensor(task.key)
-
-    #tensor = tensor.detach().cpu()
-    devices.torch_gc()
-    #torch.cuda.empty_cache()
-    return (task.key, tensor)
+    assigned_keys = assign_weights_to_keys(parsed_targets,desired_keys)
+    return calcmode, keys, assigned_keys, discard_keys, checkpoints
 
 
 def assign_weights_to_keys(targets,keys) -> dict:
@@ -255,10 +142,137 @@ def assign_weights_to_keys(targets,keys) -> dict:
     return assigned_keys
 
 
+def create_tasks(progress, calcmode, keys, assigned_keys, discard_keys,checkpoints):
+    tasks = []
+    n = 0
+    for key in keys:
+        if key in discard_keys:continue
+        elif key in SKIP_KEYS or 'model_ema' in key:
+            tasks.append(oper.LoadTensor(key,cmn.primary))
+        elif key in assigned_keys.keys():
+            n += 1
+            tasks.append(calcmode.create_recipe(key,*checkpoints,**assigned_keys[key]))
+        else:
+            tasks.append(oper.LoadTensor(key,cmn.primary))
+
+    progress('Assigned tasks: ')
+    progress('Merges', v=n)
+    progress('Default to A', v=len(tasks)-n)
+    return tasks
+
+
+def prepare_merge(progress,save_name,save_settings,finetune,*merge_args):
+    progress('\n### Preparing merge ###')
+    timer = Timer()
+    cmn.interrupted = True
+    cmn.stop = False
+
+    calcmode, keys, assigned_keys, discard_keys, checkpoints = parse_arguments(progress,*merge_args)
+    
+    tasks = create_tasks(progress, calcmode, keys, assigned_keys, discard_keys, checkpoints)
+
+    sd_unet.apply_unet("None")
+    sd_hijack.model_hijack.undo_hijack(shared.sd_model)
+
+    #Merge process begins here:
+    state_dict = merge(progress,tasks,checkpoints,finetune,timer)
+
+    merge_name = mutil.create_name(checkpoints,calcmode.name,0)
+
+    checkpoint_info = deepcopy(sd_models.get_closet_checkpoint_match(os.path.basename(cmn.primary)))
+    checkpoint_info.short_title = hash(cmn.last_merge_tasks)
+    checkpoint_info.name_for_extra = '_TEMP_MERGE_'+merge_name
+
+    if 'Autosave' in save_settings:
+        checkpoint_info = mutil.save_state_dict(state_dict,save_name or merge_name,save_settings,timer)
+    
+    with mutil.NoCaching():
+        mutil.load_merged_state_dict(state_dict,checkpoint_info)
+    
+    timer.record('Load model')
+    del state_dict
+    devices.torch_gc()
+    cmn.interrupted = False
+    progress('Merge completed in ' + timer.summary(), report=True)
+
+
+def merge(progress,tasks,checkpoints,finetune,timer) -> dict:
+    progress('### Starting merge ###')
+    cmn.checkpoints_types = {checkpoint:mutil.id_checkpoint(checkpoint)[0] for checkpoint in checkpoints}
+    tasks_copy = copy(tasks)
+    if shared.sd_model:
+        sd_models.unload_model_weights(shared.sd_model)
+
+    state_dict = {}
+
+    #Reuse merged tensors from the last merge's loaded model, if availible
+    if shared.sd_model and shared.sd_model.sd_checkpoint_info.short_title == hash(cmn.last_merge_tasks):
+        state_dict,tasks = get_tensors_from_loaded_model(state_dict,tasks)
+        if len(state_dict) > 0:
+            progress('Reusing from loaded model',v=len(state_dict))
+    
+    is_sdxl = any([type in cmn.checkpoints_types.values() for type in ['SDXL','SDXL-refiner']])
+    if ('SDXL' in cmn.opts['trash_model'] and is_sdxl) or cmn.opts['trash_model'] == 'Enable':
+        progress('Unloading webui models...')
+        while len(sd_models.model_data.loaded_sd_models) > 0:
+            model = sd_models.model_data.loaded_sd_models.pop()
+            sd_models.send_model_to_trash(model)
+        sd_models.model_data.sd_model = None
+        shared.sd_model = None
+    devices.torch_gc()
+
+    timer.record('Prepare merge')
+    progressbar = tqdm(None,total=len(tasks),desc='Merging..')
+    with safe_open_multiple(checkpoints,device=cmn.device()) as cmn.loaded_checkpoints:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=cmn.opts['threads']) as executor:
+            futures = [executor.submit(initialize_task, task) for task in tasks]
+            while True:
+                done, not_done = concurrent.futures.wait(futures,timeout=0.1)
+                progressbar.update(len(done)-progressbar.n)
+                if cmn.stop:
+                    progress.interrupt('Stopped',popup=False)
+                    
+                if len(not_done) == 0:
+                    results = [future.result() for future in done]
+                    break
+    
+    state_dict.update(dict(results))
+
+    fine = fineman(finetune, 'SDXL' in cmn.checkpoints_types[cmn.primary])
+    if finetune:
+        for key in FINETUNES:
+            state_dict.get(key)
+            if key:
+                index = FINETUNES.index(key)
+                if 5 > index : 
+                    state_dict[key] = state_dict[key]* fine[index] 
+                else :state_dict[key] = state_dict[key] + torch.tensor(fine[5]).to(state_dict[key].device)
+                for task in tasks_copy:
+                    if task.key == key:
+                        tasks_copy.remove(task)
+
+
+    cmn.last_merge_tasks = tuple(tasks_copy)
+            
+    timer.record('Merge')
+    return state_dict
+
+
+def initialize_task(task) -> tuple:
+    try:
+        tensor = task.merge()
+    except SafetensorError: #Fallback in case one of the secondary models lack a key present in the primary model
+        tensor = cmn.loaded_checkpoints[cmn.primary].get_tensor(task.key)
+
+    #tensor = tensor.detach().cpu()
+    devices.torch_gc()
+    #torch.cuda.empty_cache()
+    return (task.key, tensor)
+
+
 def get_tensors_from_loaded_model(state_dict,tasks) -> dict:
     intersected = set(cmn.last_merge_tasks).intersection(set(tasks))
     if intersected:
-        #clear loras from model
         with torch.no_grad():
             for module in shared.sd_model.modules():
                 networks.network_restore_weights_from_backup(module)
@@ -297,7 +311,7 @@ def clear_cache():
     gc.collect()
     devices.torch_gc()
     torch.cuda.empty_cache()
-    cmn.last_merge_tasks = tuple() #Not a cache but benefits 
+    cmn.last_merge_tasks = tuple() #Not a cache but is included here to give the user a way to get around it
     return "All caches cleared"
 
 
@@ -347,4 +361,3 @@ FINETUNES = [
 "model.diffusion_model.out.2.weight",
 "model.diffusion_model.out.2.bias",
 ]
-

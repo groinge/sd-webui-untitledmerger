@@ -26,6 +26,36 @@ with open(ext2abs('scripts','examplemerge.yaml'), 'r') as file:
 model_a_keys = []
 
 
+class Progress:
+    def __init__(self):
+        self.ui_report = []
+        self.merge_keys = 0
+    
+    def __call__(self,message, v=None, popup = False, report=False):
+        if v:
+            message = ' - '+ message + ' ' * (25-len(message)) + ': ' + str(v)
+
+        if report:
+            self.ui_report.append(message)
+        
+        if popup:
+            gr.Info(message)
+
+        print(message)
+        
+    def interrupt(self,message,popup=True):
+        message = 'Merge interrupted:\t'+message
+
+        if popup:
+            gr.Warning(message)
+
+        self.ui_report = [message]
+        raise merger.MergeInterruptedError
+
+    def get_report(self):
+        return '\n'.join(self.ui_report)
+
+
 class Options:
     def __init__(self,filename):
         self.filename = filename
@@ -61,7 +91,7 @@ def on_ui_tabs():
         dummy_component = gr.Textbox(visible=False,interactive=True)
         with ui_components.ResizeHandleRow():
             with gr.Column():
-                status = gr.Textbox(max_lines=1,show_label=False,info="",interactive=False,render=False)
+                status = gr.Textbox(max_lines=3,lines=3,show_label=False,info="",interactive=False,render=False)
                 #### MODEL SELECTION
                 with gr.Row():
                     slider_scale = 5
@@ -98,10 +128,10 @@ def on_ui_tabs():
                 
                 ##### MAIN SLIDERS
                 with gr.Row(equal_height=True):
-                    alpha = gr.Slider(minimum=-1,step=0.01,maximum=2,label="slider_a",info='model_a - model_b',value=0.5,elem_classes=['main_sliders'])
-                    beta = gr.Slider(minimum=-1,step=0.01,maximum=2,label="slider_b",info='-',value=0.5,elem_classes=['main_sliders'])
-                    gamma = gr.Slider(minimum=-1,step=0.01,maximum=2,label="slider_c",info='-',value=0.25,elem_classes=['main_sliders'])
-                    delta = gr.Slider(minimum=-1,step=0.01,maximum=2,label="slider_d",info='-',value=0.25,elem_classes=['main_sliders'])
+                    alpha = gr.Slider(minimum=-1,step=0.01,maximum=2,label="slider_a (alpha)",info='model_a - model_b',value=0.5,elem_classes=['main_sliders'])
+                    beta = gr.Slider(minimum=-1,step=0.01,maximum=2,label="slider_b (beta)",info='-',value=0.5,elem_classes=['main_sliders'])
+                    gamma = gr.Slider(minimum=-1,step=0.01,maximum=2,label="slider_c (gamma)",info='-',value=0.25,elem_classes=['main_sliders'])
+                    delta = gr.Slider(minimum=-1,step=0.01,maximum=2,label="slider_d (delta)",info='-',value=0.25,elem_classes=['main_sliders'])
 
                 mode_selector.change(fn=calcmode_changed, inputs=[mode_selector], outputs=[mode_selector,alpha,beta,gamma,delta],show_progress='hidden')
 
@@ -133,8 +163,7 @@ def on_ui_tabs():
                         with gr.Column():
                             clude = gr.Textbox(max_lines=4,label='Include/Exclude:',info='Entered targets will remain as model_a when set to \'Exclude\', and will be the only ones to be merged if set to \'Include\'. Separate with withspace.',value='first_stage_model',lines=4,scale=4)
                             clude_mode = gr.Radio(label="",info="",choices=["Exclude",("Include exclusively",'include')],value='Exclude',min_width=300,scale=1)
-                        discard = gr.Textbox(max_lines=5,label='Discard:',info="Targets will be removed from the model, separate with whitespace.",value='model_ema',lines=5,scale=1)
-                    
+                        discard = gr.Textbox(visible = False, max_lines=5,label='Discard:',info="Targets will be removed from the model, only applies to autosaved models. Separate with whitespace.",value='model_ema',lines=5,scale=1)
 
                 ### CUSTOM SLIDERS
                 with ui_components.InputAccordion(False, label='Custom sliders') as enable_sliders:
@@ -272,7 +301,7 @@ def on_ui_tabs():
                                             'minimum':0,
                                             'maximum':8192,
                                             'label':'Cache size (MB):',
-                                            'info':'Stores the result of intermediate calculations, such as the delta between B and C in add-difference before its multiplied and added to A.'},
+                                            'info':'Stores the result of intermediate calculations, such as the difference between B and C in add-difference before its multiplied and added to A.'},
                                             default=4096)
                 
                 cache_size_slider.release(fn=lambda x: weights_cache.__init__(x),inputs=cache_size_slider)
@@ -326,9 +355,9 @@ def on_ui_tabs():
                         seed = gr.Number(label='Seed', value=99, elem_id=gen_elem_id+" seed", min_width=100, precision=0)
 
                         random_seed = ui_components.ToolButton(ui.random_symbol, elem_id=gen_elem_id+" random_seed", tooltip="Set seed to -1, which will cause a new random number to be used every time")
-                        random_seed.click(fn=lambda:-1, show_progress=False, outputs=seed)
+                        random_seed.click(fn=lambda:-1, outputs=seed)
                         reuse_seed = ui_components.ToolButton(ui.reuse_symbol, elem_id=gen_elem_id+" reuse_seed", tooltip="Reuse seed from last generation, mostly useful if it was randomized")
-                        reuse_seed.click(fn=lambda:cmn.last_seed, show_progress=False, outputs=seed)
+                        reuse_seed.click(fn=lambda:cmn.last_seed, outputs=seed)
 
 
                     with ui_components.InputAccordion(False, label="Hires. fix", elem_id=f"{gen_elem_id}_hr") as enable_hr:
@@ -362,8 +391,8 @@ def on_ui_tabs():
                     target_tester_display = gr.Textbox(max_lines=40,lines=40,label="Targeted keys:",info="",interactive=False)
                     target_tester.change(fn=test_regex,inputs=[target_tester],outputs=target_tester_display,show_progress='minimal')
 
-
             merge_args = [
+                finetune,
                 mode_selector,
                 model_a,
                 model_b,
@@ -373,13 +402,10 @@ def on_ui_tabs():
                 gamma,
                 delta,
                 weight_editor,
-                save_name,
-                save_settings,
                 discard,
                 clude,
                 clude_mode,
                 smooth,
-                finetune,
                 enable_sliders,
                 slider_slider,
                 *custom_sliders
@@ -406,7 +432,7 @@ def on_ui_tabs():
                 hr_resize_y
             ]
 
-            merge_button.click(fn=merger.start_merge,inputs=merge_args,outputs=status)
+            merge_button.click(fn=start_merge,inputs=[save_name,save_settings,*merge_args],outputs=status)
 
             def merge_interrupted(func):
                 @functools.wraps(func)
@@ -417,8 +443,8 @@ def on_ui_tabs():
                         return gr.update(),gr.update(),gr.update()
                 return inner
 
-            merge_and_gen_button.click(fn=merger.start_merge,
-                                       inputs=merge_args,
+            merge_and_gen_button.click(fn=start_merge,
+                                       inputs=[save_name,save_settings,*merge_args],
                                        outputs=status).then(
                                         fn=merge_interrupted(call_queue.wrap_gradio_gpu_call(misc_util.image_gen, extra_outputs=[None, '', ''])),
                                         _js='submit_imagegen',
@@ -435,6 +461,24 @@ def on_ui_tabs():
     return [(cmn.blocks, "Untitled merger", "untitled_merger")]
 
 script_callbacks.on_ui_tabs(on_ui_tabs)
+
+
+def start_merge(*args):
+    progress = Progress()
+
+    try:
+        merger.prepare_merge(progress, *args)
+    except Exception as error:
+
+        merger.clear_cache()
+        if not shared.sd_model:
+            sd_models.reload_model_weights(forced_reload=True)
+
+        if not isinstance(error,merger.MergeInterruptedError):
+            raise
+        
+    return progress.get_report()
+
 
 def test_regex(input):
     regex = misc_util.target_to_regex(input)
@@ -493,7 +537,7 @@ def calcmode_changed(calcmode_name):
 
 def get_checkpoints_list():
     checkpoints_list = [checkpoint for checkpoint in sd_models.checkpoint_tiles() if checkpoint.split(' ')[0].endswith('.safetensors')]
-    if  cmn.opts['checkpoint_sorting'] == 'Newest first':
+    if cmn.opts['checkpoint_sorting'] == 'Newest first':
         sort_func = lambda x: os.path.getctime(sd_models.get_closet_checkpoint_match(x).filename)
         checkpoints_list.sort(key=sort_func,reverse=True)
     return checkpoints_list

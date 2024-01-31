@@ -207,7 +207,8 @@ def resize_tensors(tensor1, tensor2):
 #The cache
 class WeightsCache(cachetools.LRUCache):
     def __init__(self, size):
-        super().__init__(size*1024*1024,lambda x: x.element_size() * x.nelement())
+        capped = min(size, 8192)
+        super().__init__(capped*1024*1024,lambda x: x.element_size() * x.nelement())
 
     def __setitem__(self, key, value):
         value = value.detach().cpu()
@@ -218,6 +219,6 @@ class WeightsCache(cachetools.LRUCache):
         return res.clone().to(cmn.device()).type(cmn.dtype())
     
     
-weights_cache = WeightsCache(0)
+weights_cache = WeightsCache(4096)
 
 
