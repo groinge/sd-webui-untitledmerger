@@ -34,7 +34,7 @@ SKIP_KEYS = [
     "sqrt_recipm1_alphas_cumprod"
 ]
 
-WEIGHT_NAMES = ('alpha','beta','gamma','delta')
+VALUE_NAMES = ('alpha','beta','gamma','delta')
 
 calcmode_selection = {}
 for calcmode_obj in calcmodes.CALCMODES_LIST:
@@ -71,7 +71,7 @@ def parse_arguments(progress,calcmode_name,model_a,model_b,model_c,slider_a,slid
             parsed_targets[selector] = {'smooth':smooth}
             for n,weight in enumerate(weights.split(',')):
                 try:
-                    parsed_targets[selector][WEIGHT_NAMES[n]] = float(weight)
+                    parsed_targets[selector][VALUE_NAMES[n]] = float(weight)
                 except ValueError:pass
 
     checkpoints = []
@@ -114,7 +114,7 @@ def parse_arguments(progress,calcmode_name,model_a,model_b,model_c,slider_a,slid
     return calcmode, keys, assigned_keys, discard_keys, checkpoints
 
 
-def assign_weights_to_keys(targets,keys) -> dict:
+def assign_weights_to_keys(targets,keys,already_assigned=None) -> dict:
     weight_assigners = []
     keystext = "\n".join(keys)
 
@@ -132,7 +132,7 @@ def assign_weights_to_keys(targets,keys) -> dict:
     keys_n_weights.sort(key=lambda x: len(x[0]))
     keys_n_weights.reverse()
 
-    assigned_keys = defaultdict()
+    assigned_keys = already_assigned or defaultdict()
     assigned_keys.default_factory = dict
     
     for keys, weights in keys_n_weights:

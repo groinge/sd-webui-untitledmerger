@@ -2,6 +2,7 @@ import torch,scipy,cachetools
 import scripts.untitled.common as cmn
 import torch.nn.functional as F
 import numpy as np
+from math import log10
 
 
 #Wrappers
@@ -203,6 +204,37 @@ def resize_tensors(tensor1, tensor2):
         tensor2 = F.pad(tensor2, (0, 0, 0, padding_size))
 
     return tensor1, tensor2
+
+
+class ShuffleTensor(Operation):
+    def __init__(self,key,alpha,*sources):
+        super().__init__(key,*sources)
+        self.alpha = alpha
+
+    def oper(self, a, b):
+        bitmask = torch.empty_like(a,dtype=cmn.dtype()).uniform_(0,1) > self.alpha
+        res = a * bitmask + b * ~bitmask
+        return res
+
+
+class InterpolateDifference(Operation):
+    def __init__(self,key,alpha,beta,*sources):
+        super().__init__(key,*sources)
+        self.alpha = alpha
+        self.beta = beta
+
+    def oper(self, a, b):
+        delta = torch.abs(a - b)
+        
+        exp = 32**log10(1 / (1 - self.alpha) - 1) if 0 < self.alpha < 1 else self.alpha*32
+
+        if self.beta < 0.5:
+            v = (delta / torch.max(delta)) ** exp
+        else:
+            v = (1 - delta / torch.max(delta)) ** exp
+
+        res = a * v + b * (1-v)
+        return res
 
 #The cache
 class WeightsCache(cachetools.LRUCache):

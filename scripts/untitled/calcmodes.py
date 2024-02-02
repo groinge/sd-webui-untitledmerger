@@ -52,6 +52,28 @@ class WeightSum(CalcMode):
 CALCMODES_LIST.append(WeightSum)
 
 
+
+class InterpDifference(CalcMode):
+    name = 'Comparative Interpolation'
+    description = 'Interpolates between each pair of values from A and B depending on their difference relative to other values'
+    input_models = 2
+    input_sliders = 2
+    slid_a_info = "model_a - model_b"
+    slid_a_config = (0, 1, 0.01)
+    slid_b_info = "similarity - difference"
+    slid_b_config = (0, 1, 1)
+
+    def create_recipe(key, model_a, model_b, model_c, alpha=0, beta=0, **kwargs):
+        a = opr.LoadTensor(key,model_a)
+        if key.startswith('cond_stage_model.transformer.text_model.embeddings'):
+            return a
+        b = opr.LoadTensor(key,model_b)
+
+        return opr.InterpolateDifference(key, alpha, beta, a ,b)
+    
+CALCMODES_LIST.append(InterpDifference)
+
+
 class AddDifference(CalcMode):
     name = 'Add Difference'
     description = 'model_a + (model_b - model_c) * alpha'
@@ -195,6 +217,6 @@ class PowerUp(CalcMode):
 
         return opr.Add(key, a, res)
 
-        
 CALCMODES_LIST.append(PowerUp)
+
 
