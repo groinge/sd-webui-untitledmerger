@@ -233,10 +233,9 @@ class InterpolateDifference(Operation):
         else:
             diff = (1 - delta / torch.max(delta)) ** self.alpha
 
-        #torch.cuda.manual_seed(self.seed)
         rngenerator = torch.Generator(device=diff.device)
         rngenerator.manual_seed(self.seed)
-        bitmask = torch.bernoulli(diff,out=torch.empty_like(diff),generator=rngenerator)
+        bitmask = torch.bernoulli(torch.clamp(diff,0,1),out=torch.empty_like(diff),generator=rngenerator)
 
         interpolated_mask = torch.lerp(bitmask, diff, self.gamma).to(a.dtype)
 

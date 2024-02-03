@@ -94,40 +94,45 @@ def on_ui_tabs():
                 status = gr.Textbox(max_lines=3,lines=3,show_label=False,info="",interactive=False,render=False)
                 #### MODEL SELECTION
                 with gr.Row():
-                    slider_scale = 5
+                    slider_scale = 8
                     with gr.Column(variant='compact',min_width=150,scale=slider_scale):
                         with gr.Row():
-                            model_a = gr.Dropdown(get_checkpoints_list(), label="model_a",scale=slider_scale)
+                            model_a = gr.Dropdown(get_checkpoints_list('Alphabetical'), label="model_a",scale=slider_scale)
                             swap_models_AB = gr.Button(value='⇆', elem_classes=["tool"],scale=1)
                         model_a_info = gr.HTML(plaintext_to_html('None | None',classname='untitled_sd_version'))
                         model_a.change(fn=checkpoint_changed,inputs=model_a,outputs=model_a_info).then(fn=update_model_a_keys, inputs=model_a)
 
                     with gr.Column(variant='compact',min_width=150,scale=slider_scale):
                         with gr.Row():
-                            model_b = gr.Dropdown(get_checkpoints_list(), label="model_b",scale=slider_scale)
+                            model_b = gr.Dropdown(get_checkpoints_list('Alphabetical'), label="model_b",scale=slider_scale)
                             swap_models_BC = gr.Button(value='⇆', elem_classes=["tool"],scale=1)
                         model_b_info = gr.HTML(plaintext_to_html('None | None',classname='untitled_sd_version'))
                         model_b.change(fn=checkpoint_changed,inputs=model_b,outputs=model_b_info)
 
                     with gr.Column(variant='compact',min_width=150,scale=slider_scale):
                         with gr.Row():
-                            model_c = gr.Dropdown(get_checkpoints_list(), label="model_c",scale=slider_scale)
+                            model_c = gr.Dropdown(get_checkpoints_list('Alphabetical'), label="model_c",scale=slider_scale)
                             refresh_button = gr.Button(value='🔄', elem_classes=["tool"],scale=1)
                         model_c_info = gr.HTML(plaintext_to_html('None | None',classname='untitled_sd_version'))
                         model_c.change(fn=checkpoint_changed,inputs=model_c,outputs=model_c_info)
                     
-                    gr.Dropdown(min_width=80,scale=1,visible=True)
+                    checkpoint_sort = gr.Dropdown(min_width=60,scale=1,visible=True,choices=['Alphabetical','Newest first'],value='Alphabetical',label='Sort')
 
                     def swapvalues(x,y): return gr.update(value=y), gr.update(value=x)
                     swap_models_AB.click(fn=swapvalues,inputs=[model_a,model_b],outputs=[model_a,model_b])
                     swap_models_BC.click(fn=swapvalues,inputs=[model_b,model_c],outputs=[model_b,model_c])
-                    refresh_button.click(fn=refresh_models,outputs=[model_a,model_b,model_c])
+                    refresh_button.click(fn=refresh_models,inputs=checkpoint_sort, outputs=[model_a,model_b,model_c])
+                    checkpoint_sort.change(fn=refresh_models,inputs=checkpoint_sort,outputs=[model_a,model_b,model_c])
+                    
 
                 #### MODE SELECTION
-                with gr.Row(equal_height=False):
+                with gr.Row():
                     mode_selector = gr.Radio(label='Merge mode:',choices=list(merger.calcmode_selection.keys()),value=list(merger.calcmode_selection.keys())[0],scale=3)
-                    merge_seed = gr.Number(label='Merge Seed', value=99,  min_width=100, precision=0,scale=1)
+                    
 
+                #### SNEED
+                with gr.Row():
+                    merge_seed = gr.Number(label='Merge Seed', value=99,  min_width=100, precision=0,scale=1)
                     merge_random_seed = ui_components.ToolButton(ui.random_symbol, tooltip="Set seed to -1, which will cause a new random number to be used every time")
                     merge_random_seed.click(fn=lambda:-1, outputs=merge_seed)
                     merge_reuse_seed = ui_components.ToolButton(ui.reuse_symbol, tooltip="Reuse seed from last generation, mostly useful if it was randomized")
@@ -150,7 +155,7 @@ def on_ui_tabs():
                         with gr.Row():
                             save_settings = gr.CheckboxGroup(label = " ",choices=["Autosave","Overwrite","fp16"],value=['fp16'],interactive=True,scale=2,min_width=100)
                             save_loaded = gr.Button(value='Save loaded checkpoint',size='sm',scale=1)
-                            save_loaded.click(fn=misc_util.save_loaded_model, inputs=[save_name,save_settings],outputs=status).then(fn=refresh_models,outputs=[model_a,model_b,model_c])
+                            save_loaded.click(fn=misc_util.save_loaded_model, inputs=[save_name,save_settings],outputs=status).then(fn=refresh_models, inputs=checkpoint_sort,outputs=[model_a,model_b,model_c])
 
                 #### MERGE BUTTONS
                     with gr.Column():
@@ -271,15 +276,10 @@ def on_ui_tabs():
                     col2.release(fn=finetune_update, inputs=[finetune, *finetunes], outputs=finetune, show_progress=False)
                     col3.release(fn=finetune_update, inputs=[finetune, *finetunes], outputs=finetune, show_progress=False)
 
+                ###OPTIONS####
                 with gr.Accordion(label='Options',open=False):
                     save_options_button = gr.Button(value = 'Save',variant='primary')
                     save_options_button.click(fn=cmn.opts.save)
-                    cmn.opts.create_option('checkpoint_sorting',
-                                        gr.Radio,
-                                        {'choices':['Alphabetical','Newest first'],
-                                            'label':'Checkpoints dropdown sorting:'},
-                                            default='Alphabetical')
-
                     cmn.opts.create_option('trash_model',
                                         gr.Radio,
                                         {'choices':['Disable','Enable for SDXL','Enable'],
@@ -542,17 +542,17 @@ def calcmode_changed(calcmode_name):
     return gr.update(info = calcmode.description),slider_a_update,slider_b_update,slider_c_update,slider_d_update
 
 
-def get_checkpoints_list():
+def get_checkpoints_list(sort):
     checkpoints_list = [checkpoint for checkpoint in sd_models.checkpoint_tiles() if checkpoint.split(' ')[0].endswith('.safetensors')]
-    if cmn.opts['checkpoint_sorting'] == 'Newest first':
+    if sort == 'Newest first':
         sort_func = lambda x: os.path.getctime(sd_models.get_closet_checkpoint_match(x).filename)
         checkpoints_list.sort(key=sort_func,reverse=True)
     return checkpoints_list
 
 
-def refresh_models():
+def refresh_models(sort):
     sd_models.list_models()
-    checkpoints_list = get_checkpoints_list()
+    checkpoints_list = get_checkpoints_list(sort)
     
     return gr.update(choices=checkpoints_list),gr.update(choices=checkpoints_list),gr.update(choices=checkpoints_list)
 
