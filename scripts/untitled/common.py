@@ -12,6 +12,7 @@ checkpoints_types = None
 primary = ""
 
 last_merge_tasks = tuple()
+last_merge_seed = -1
 
 def device():
     device,dtype = opts['device'].split('/')

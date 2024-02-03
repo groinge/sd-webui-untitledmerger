@@ -21,7 +21,7 @@ class CalcMode:
     slid_d_info = '-'
     slid_d_config = (-1, 2, 0.01)
 
-    def create_recipe(self, key, model_a, model_b, model_c, smooth=False, alpha=0, beta=0, gamma=0, delta=0) -> opr.Operation:
+    def create_recipe(self, key, model_a, model_b, model_c, seed=False, alpha=0, beta=0, gamma=0, delta=0) -> opr.Operation:
         raise NotImplementedError
 
 
@@ -54,22 +54,26 @@ CALCMODES_LIST.append(WeightSum)
 
 
 class InterpDifference(CalcMode):
-    name = 'Comparative Interpolation'
+    name = 'Comparative Interp'
     description = 'Interpolates between each pair of values from A and B depending on their difference relative to other values'
     input_models = 2
-    input_sliders = 2
+    input_sliders = 3
     slid_a_info = "model_a - model_b"
     slid_a_config = (0, 1, 0.01)
     slid_b_info = "similarity - difference"
     slid_b_config = (0, 1, 1)
+    slid_c_info = "soften"
+    slid_c_config = (0, 1, 0.01)
 
-    def create_recipe(key, model_a, model_b, model_c, alpha=0, beta=0, **kwargs):
+    def create_recipe(key, model_a, model_b, model_c, alpha=0, beta=0, gamma=0, seed=0, **kwargs):
         a = opr.LoadTensor(key,model_a)
         if key.startswith('cond_stage_model.transformer.text_model.embeddings'):
             return a
         b = opr.LoadTensor(key,model_b)
 
-        return opr.InterpolateDifference(key, alpha, beta, a ,b)
+        exp = 1 / (1 - alpha) - 1 if 0 < alpha < 1 else alpha*100
+
+        return opr.InterpolateDifference(key, exp, beta, gamma, seed, a ,b)
     
 CALCMODES_LIST.append(InterpDifference)
 
@@ -81,14 +85,16 @@ class AddDifference(CalcMode):
     input_sliders = 1
     slid_a_info = "addition multiplier"
     slid_a_config = (-1, 2, 0.01)
+    slid_b_info = "smooth (slow)"
+    slid_b_config = (0, 1, 1)
 
-    def create_recipe(key, model_a, model_b, model_c, alpha=0, smooth=False, **kwargs):
+    def create_recipe(key, model_a, model_b, model_c, alpha=0, beta=0, **kwargs):
         a = opr.LoadTensor(key,model_a)
         b = opr.LoadTensor(key,model_b)
         c = opr.LoadTensor(key,model_c)
 
         diff = opr.Sub(key, b, c)
-        if smooth:
+        if beta == 1:
             diff = opr.Smooth(key,diff)
         diff.cache()
 
@@ -108,14 +114,12 @@ class TrainDifference(CalcMode):
     slid_a_info = "addition multiplier"
     slid_a_config = (-1, 2, 0.01)
 
-    def create_recipe(key, model_a, model_b, model_c, alpha=0, smooth=False, **kwargs):
+    def create_recipe(key, model_a, model_b, model_c, alpha=0, **kwargs):
         a = opr.LoadTensor(key,model_a)
         b = opr.LoadTensor(key,model_b)
         c = opr.LoadTensor(key,model_c)
 
         diff = opr.TrainDiff(key,a, b, c)
-        if smooth:
-            diff = opr.Smooth(key,diff)
         diff.cache()
 
         diffm = opr.Multiply(key, alpha, diff)
@@ -144,14 +148,12 @@ class Extract(CalcMode):
     slid_d_info = 'addition multiplier'
     slid_d_config = (-1, 4, 0.01)
 
-    def create_recipe(key, model_a, model_b, model_c, alpha=0, beta=0, gamma=0, delta=1, smooth=False):
+    def create_recipe(key, model_a, model_b, model_c, alpha=0, beta=0, gamma=0, delta=1):
         a = opr.LoadTensor(key,model_a)
         b = opr.LoadTensor(key,model_b)
         c = opr.LoadTensor(key,model_c)
 
         extracted = opr.Extract(key, alpha, beta, gamma*15, a, b, c)
-        if smooth:
-            extracted = opr.Smooth(key, extracted)
         extracted.cache()
 
         multiplied = opr.Multiply(key, delta, extracted)
@@ -177,14 +179,12 @@ class AddDisimilarity(CalcMode):
     slid_c_info = 'similarity bias'
     slid_c_config = (0, 2, 0.01)
 
-    def create_recipe(key, model_a, model_b, model_c, alpha=0, beta=0, gamma=0, delta=1, smooth=False):
+    def create_recipe(key, model_a, model_b, model_c, alpha=0, beta=0, gamma=0, delta=1, **kwargs):
         a = opr.LoadTensor(key,model_a)
         b = opr.LoadTensor(key,model_b)
         c = opr.LoadTensor(key,model_c)
 
         extracted = opr.Similarities(key, alpha, 1, gamma*15, b, c)
-        if smooth:
-            extracted = opr.Smooth(key, extracted)
         extracted.cache()
 
         multiplied = opr.Multiply(key, beta, extracted)
@@ -193,6 +193,7 @@ class AddDisimilarity(CalcMode):
         return res
     
 CALCMODES_LIST.append(AddDisimilarity)
+        
         
 class PowerUp(CalcMode):
     name = 'Power-up (DARE)'
@@ -204,13 +205,11 @@ class PowerUp(CalcMode):
     slid_b_info = "addition multiplier"
     slid_b_config = (-1, 4, 0.01)
 
-    def create_recipe(key, model_a, model_b, model_c, alpha=0, beta=0,smooth=0, **kwargs):
+    def create_recipe(key, model_a, model_b, model_c, alpha=0, beta=0, **kwargs):
         a = opr.LoadTensor(key,model_a)
         b = opr.LoadTensor(key,model_b)
 
         deltahat = opr.PowerUp(key, alpha, a, b)
-        if smooth:
-            deltahat = opr.Smooth(key,deltahat)
         deltahat.cache()
 
         res = opr.Multiply(key, beta, deltahat)

@@ -8,7 +8,7 @@ import scripts.untitled.misc_util as mutil
 import scripts.untitled.common as cmn
 import scripts.untitled.calcmodes as calcmodes
 from modules.timer import Timer
-import torch,os,re,gc
+import torch,os,re,gc,random
 from tqdm import tqdm
 from copy import copy,deepcopy
 from modules import devices,shared,script_loading,paths,paths_internal,sd_models,sd_unet,sd_hijack
@@ -41,9 +41,13 @@ for calcmode_obj in calcmodes.CALCMODES_LIST:
     calcmode_selection.update({calcmode_obj.name: calcmode_obj})
 
 
-def parse_arguments(progress,calcmode_name,model_a,model_b,model_c,slider_a,slider_b,slider_c,slider_d,editor,discard,clude,clude_mode,smooth,enable_sliders,active_sliders,*custom_sliders):
+def parse_arguments(progress,calcmode_name,model_a,model_b,model_c,slider_a,slider_b,slider_c,slider_d,editor,discard,clude,clude_mode,seed,enable_sliders,active_sliders,*custom_sliders):
     calcmode = calcmode_selection[calcmode_name]
     parsed_targets = {}
+
+    if seed < 0:
+        seed = random.randint(10**9,10**10-1)
+    cmn.last_merge_seed = seed
 
     if enable_sliders:
         slider_col_a = custom_sliders[:int(len(custom_sliders)/2)]
@@ -51,7 +55,7 @@ def parse_arguments(progress,calcmode_name,model_a,model_b,model_c,slider_a,slid
 
         enabled_sliders = slider_col_a[:active_sliders] + slider_col_b[:active_sliders]
         it = iter(enabled_sliders)
-        parsed_sliders = {it.__next__():{'alpha':it.__next__(),'smooth':smooth} for x in range(0,active_sliders)}
+        parsed_sliders = {it.__next__():{'alpha':it.__next__(),'seed':seed} for x in range(0,active_sliders)}
         parsed_targets.update(parsed_sliders)
         try:
             del parsed_targets['']
@@ -68,7 +72,7 @@ def parse_arguments(progress,calcmode_name,model_a,model_b,model_c,slider_a,slid
         if target != "":
             target = re.sub(r'\s+','',target)
             selector, weights = target.split(':')
-            parsed_targets[selector] = {'smooth':smooth}
+            parsed_targets[selector] = {'seed':seed}
             for n,weight in enumerate(weights.split(',')):
                 try:
                     parsed_targets[selector][VALUE_NAMES[n]] = float(weight)

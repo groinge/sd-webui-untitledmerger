@@ -115,6 +115,8 @@ def on_ui_tabs():
                             refresh_button = gr.Button(value='🔄', elem_classes=["tool"],scale=1)
                         model_c_info = gr.HTML(plaintext_to_html('None | None',classname='untitled_sd_version'))
                         model_c.change(fn=checkpoint_changed,inputs=model_c,outputs=model_c_info)
+                    
+                    gr.Dropdown(min_width=80,scale=1,visible=True)
 
                     def swapvalues(x,y): return gr.update(value=y), gr.update(value=x)
                     swap_models_AB.click(fn=swapvalues,inputs=[model_a,model_b],outputs=[model_a,model_b])
@@ -122,9 +124,14 @@ def on_ui_tabs():
                     refresh_button.click(fn=refresh_models,outputs=[model_a,model_b,model_c])
 
                 #### MODE SELECTION
-                with gr.Row():
+                with gr.Row(equal_height=False):
                     mode_selector = gr.Radio(label='Merge mode:',choices=list(merger.calcmode_selection.keys()),value=list(merger.calcmode_selection.keys())[0],scale=3)
-                    smooth = gr.Checkbox(label='Smooth Add',info='Filter additions to prevent burning at high weights. (slow)',show_label=True,scale=1)
+                    merge_seed = gr.Number(label='Merge Seed', value=99,  min_width=100, precision=0,scale=1)
+
+                    merge_random_seed = ui_components.ToolButton(ui.random_symbol, tooltip="Set seed to -1, which will cause a new random number to be used every time")
+                    merge_random_seed.click(fn=lambda:-1, outputs=merge_seed)
+                    merge_reuse_seed = ui_components.ToolButton(ui.reuse_symbol, tooltip="Reuse seed from last generation, mostly useful if it was randomized")
+                    merge_reuse_seed.click(fn=lambda:cmn.last_merge_seed, outputs=merge_seed)
                 
                 ##### MAIN SLIDERS
                 with gr.Row(equal_height=True):
@@ -161,7 +168,7 @@ def on_ui_tabs():
                 with gr.Accordion(label='Include/Exclude/Discard',open=False):
                     with gr.Row():
                         with gr.Column():
-                            clude = gr.Textbox(max_lines=4,label='Include/Exclude:',info='Entered targets will remain as model_a when set to \'Exclude\', and will be the only ones to be merged if set to \'Include\'. Separate with withspace.',value='first_stage_model',lines=4,scale=4)
+                            clude = gr.Textbox(max_lines=4,label='Include/Exclude:',info='Entered targets will remain as model_a when set to \'Exclude\', and will be the only ones to be merged if set to \'Include\'. Separate with withspace.',value='first_stage_model\nclip.emb',lines=4,scale=4)
                             clude_mode = gr.Radio(label="",info="",choices=["Exclude",("Include exclusively",'include')],value='Exclude',min_width=300,scale=1)
                         discard = gr.Textbox(visible = False, max_lines=5,label='Discard:',info="Targets will be removed from the model, only applies to autosaved models. Separate with whitespace.",value='model_ema',lines=5,scale=1)
 
@@ -405,7 +412,7 @@ def on_ui_tabs():
                 discard,
                 clude,
                 clude_mode,
-                smooth,
+                merge_seed,
                 enable_sliders,
                 slider_slider,
                 *custom_sliders

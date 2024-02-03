@@ -2,7 +2,6 @@ import torch,scipy,cachetools
 import scripts.untitled.common as cmn
 import torch.nn.functional as F
 import numpy as np
-from math import log10
 
 
 #Wrappers
@@ -37,13 +36,15 @@ class Operation:
         self.alpha = None
         self.beta = None
         self.gamma = None
+        self.delta = None
+        self.seed = None
         self.merge_func = recurse
 
     def __eq__(self, other):
-        return (self.key, self.alpha, self.beta, self.gamma, self.sources) == (other.key, other.alpha, other.beta, other.gamma, other.sources)
+        return (self.key, self.alpha, self.beta, self.gamma, self.delta, self.seed, self.sources) == (other.key, other.alpha, other.beta, other.gamma, other.delta, other.seed, other.sources)
     
     def __hash__(self):
-        return hash((self.key, self.alpha, self.beta, self.gamma, self.sources))
+        return hash((self.key, self.alpha, self.beta, self.gamma, self.delta, self.seed, self.sources))
     
     def oper(self,*args) -> torch.Tensor:
         raise NotImplementedError
@@ -172,10 +173,9 @@ class PowerUp(Operation):
     def oper(self, a, b):
         # Calculate the delta of the weights
         a, b = resize_tensors(a, b)
-
         delta = b - a
         # Generate the mask m^t from Bernoulli distribution
-        m = torch.from_numpy(np.random.binomial(1, self.alpha, delta.shape)).to(cmn.device()).type(cmn.dtype())
+        m = torch.empty_like(delta,dtype=cmn.dtype()).uniform_(0,1) < self.alpha
         # Apply the mask to the delta to get δ̃^t
         delta_tilde = m * delta
         # Scale the masked delta by the dropout rate to get δ̂^t
@@ -212,28 +212,35 @@ class ShuffleTensor(Operation):
         self.alpha = alpha
 
     def oper(self, a, b):
-        bitmask = torch.empty_like(a,dtype=cmn.dtype()).uniform_(0,1) > self.alpha
+        bitmask = torch.empty(a,dtype=cmn.dtype()).uniform_(0,1) > self.alpha
         res = a * bitmask + b * ~bitmask
         return res
 
 
 class InterpolateDifference(Operation):
-    def __init__(self,key,alpha,beta,*sources):
+    def __init__(self,key,alpha,beta,gamma,seed,*sources):
         super().__init__(key,*sources)
         self.alpha = alpha
         self.beta = beta
+        self.gamma = gamma
+        self.seed = seed
 
     def oper(self, a, b):
         delta = torch.abs(a - b)
-        
-        exp = 32**log10(1 / (1 - self.alpha) - 1) if 0 < self.alpha < 1 else self.alpha*32
 
-        if self.beta < 0.5:
-            v = (delta / torch.max(delta)) ** exp
+        if self.beta != 1:
+            diff = (delta / torch.max(delta)) ** self.alpha
         else:
-            v = (1 - delta / torch.max(delta)) ** exp
+            diff = (1 - delta / torch.max(delta)) ** self.alpha
 
-        res = a * v + b * (1-v)
+        #torch.cuda.manual_seed(self.seed)
+        rngenerator = torch.Generator(device=diff.device)
+        rngenerator.manual_seed(self.seed)
+        bitmask = torch.bernoulli(diff,out=torch.empty_like(diff),generator=rngenerator)
+
+        interpolated_mask = torch.lerp(bitmask, diff, self.gamma).to(a.dtype)
+
+        res = a * interpolated_mask  + b * (1 - interpolated_mask)
         return res
 
 #The cache
