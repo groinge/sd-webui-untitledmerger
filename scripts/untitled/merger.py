@@ -204,7 +204,7 @@ def merge(progress,tasks,checkpoints,finetune,timer) -> dict:
     progress('### Starting merge ###')
     cmn.checkpoints_types = {checkpoint:mutil.id_checkpoint(checkpoint)[0] for checkpoint in checkpoints}
     tasks_copy = copy(tasks)
-    if shared.sd_model:
+    if shared.sd_model and shared.sd_model.device != 'cpu':
         sd_models.unload_model_weights(shared.sd_model)
 
     state_dict = {}

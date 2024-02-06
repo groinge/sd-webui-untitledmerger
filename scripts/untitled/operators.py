@@ -5,8 +5,6 @@ import numpy as np
 from collections import OrderedDict
 
 
-#Wrappers
-
 def recurse(operation):
     source_tensors = []
     for source_oper in operation.sources:
@@ -176,7 +174,7 @@ class PowerUp(Operation):
         a, b = resize_tensors(a, b)
         delta = b - a
         # Generate the mask m^t from Bernoulli distribution
-        m = torch.empty_like(delta,dtype=cmn.dtype()).uniform_(0,1) < self.alpha
+        m = torch.empty_like(delta[0],device=cmn.device(),dtype=torch.float32).uniform_(0,1) < self.alpha
         # Apply the mask to the delta to get δ̃^t
         delta_tilde = m * delta
         # Scale the masked delta by the dropout rate to get δ̂^t
@@ -207,17 +205,6 @@ def resize_tensors(tensor1, tensor2):
     return tensor1, tensor2
 
 
-class ShuffleTensor(Operation):
-    def __init__(self,key,alpha,*sources):
-        super().__init__(key,*sources)
-        self.alpha = alpha
-
-    def oper(self, a, b):
-        bitmask = torch.empty(a,dtype=cmn.dtype()).uniform_(0,1) > self.alpha
-        res = a * bitmask + b * ~bitmask
-        return res
-
-
 class InterpolateDifference(Operation):
     def __init__(self,key,alpha,beta,gamma,seed,*sources):
         super().__init__(key,*sources)
@@ -227,12 +214,16 @@ class InterpolateDifference(Operation):
         self.seed = seed
 
     def oper(self, a, b):
+        alpha = max(self.alpha,0.001)
+
         delta = torch.abs(a - b)
 
         if self.beta != 1:
-            diff = (delta / torch.max(delta)) ** self.alpha
+            diff = ((torch.max(delta) - delta) / torch.max(delta)) ** (1 / alpha - 1)
         else:
-            diff = (1 - delta / torch.max(delta)) ** self.alpha
+            diff = (delta / torch.max(delta)) ** (1 / alpha - 1)
+
+        diff = torch.nan_to_num(diff)
 
         rngenerator = torch.Generator(device=diff.device)
         rngenerator.manual_seed(self.seed)
@@ -240,7 +231,7 @@ class InterpolateDifference(Operation):
 
         interpolated_mask = torch.lerp(bitmask, diff, self.gamma).to(a.dtype)
 
-        res = a * interpolated_mask  + b * (1 - interpolated_mask)
+        res = a * (1 - interpolated_mask) + b * interpolated_mask
         return res
 
 #The cache

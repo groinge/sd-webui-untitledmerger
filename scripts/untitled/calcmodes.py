@@ -52,7 +52,6 @@ class WeightSum(CalcMode):
 CALCMODES_LIST.append(WeightSum)
 
 
-
 class InterpDifference(CalcMode):
     name = 'Comparative Interp'
     description = 'Interpolates between each pair of values from A and B depending on their difference relative to other values'
@@ -71,9 +70,7 @@ class InterpDifference(CalcMode):
             return a
         b = opr.LoadTensor(key,model_b)
 
-        exp = 1 / (1 - alpha) - 1 if 0 < alpha < 1 else alpha*100
-
-        return opr.InterpolateDifference(key, exp, beta, gamma, seed, a ,b)
+        return opr.InterpolateDifference(key, alpha, beta, gamma, seed, a ,b)
     
 CALCMODES_LIST.append(InterpDifference)
 
