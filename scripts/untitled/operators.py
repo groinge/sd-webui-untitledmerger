@@ -1,7 +1,8 @@
-import torch,scipy,cachetools
+import torch,scipy
 import scripts.untitled.common as cmn
 import torch.nn.functional as F
 import numpy as np
+from collections import OrderedDict
 
 
 #Wrappers
@@ -243,20 +244,31 @@ class InterpolateDifference(Operation):
         return res
 
 #The cache
-class WeightsCache(cachetools.LRUCache):
-    def __init__(self, size):
-        capped = min(size, 8192)
-        super().__init__(capped*1024*1024,lambda x: x.element_size() * x.nelement())
+tensor_size = lambda x: x.element_size() * x.nelement()
 
-    def __setitem__(self, key, value):
-        value = value.detach().cpu()
-        super().__setitem__(key,value)
+class WeightsCache:
+    def __init__(self, size):
+        self.mapping = OrderedDict()
+        self.size_cap = min(size, 8192)*1024*1024
+        self.size = 0
+
+    def __setitem__(self, key, t):
+        if key in self.mapping:
+            self.mapping.move_to_end(key)
+        else:
+            t = t.detach().cpu()
+            self.mapping[key] = t
+            self.size += tensor_size(t)
+            while self.size >= self.size_cap:
+                _ , tensor = self.mapping.popitem(last=False)
+                self.size -= tensor_size(tensor)
 
     def __getitem__(self, key: Operation) -> torch.Tensor:
-        res = super().__getitem__(key)
-        return res.clone().to(cmn.device()).type(cmn.dtype())
+        t = self.mapping[key]
+        self.mapping.move_to_end(key)
+        return t.clone().to(cmn.device()).type(cmn.dtype())
     
-    
+
 weights_cache = WeightsCache(4096)
 
 
