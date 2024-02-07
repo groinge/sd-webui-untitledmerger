@@ -57,14 +57,14 @@ class InterpDifference(CalcMode):
     description = 'Interpolates between each pair of values from A and B depending on their difference relative to other values'
     input_models = 2
     input_sliders = 3
-    slid_a_info = "model_a - model_b"
+    slid_a_info = "concave - convex"
     slid_a_config = (0, 1, 0.01)
     slid_b_info = "similarity - difference"
     slid_b_config = (0, 1, 1)
-    slid_c_info = "soften"
+    slid_c_info = "binomial - linear"
     slid_c_config = (0, 1, 0.01)
 
-    def create_recipe(key, model_a, model_b, model_c, alpha=0, beta=0, gamma=0, seed=0, **kwargs):
+    def create_recipe(key, model_a, model_b, model_c, alpha=0, beta=0, gamma=0, delta = 0, seed=0, **kwargs):
         a = opr.LoadTensor(key,model_a)
         if key.startswith('cond_stage_model.transformer.text_model.embeddings'):
             return a
@@ -145,7 +145,7 @@ class Extract(CalcMode):
     slid_d_info = 'addition multiplier'
     slid_d_config = (-1, 4, 0.01)
 
-    def create_recipe(key, model_a, model_b, model_c, alpha=0, beta=0, gamma=0, delta=1):
+    def create_recipe(key, model_a, model_b, model_c, alpha=0, beta=0, gamma=0, delta=1, **kwargs):
         a = opr.LoadTensor(key,model_a)
         b = opr.LoadTensor(key,model_b)
         c = opr.LoadTensor(key,model_c)
@@ -194,7 +194,7 @@ CALCMODES_LIST.append(AddDisimilarity)
         
 class PowerUp(CalcMode):
     name = 'Power-up (DARE)'
-    description = 'Adds the capabilities of model B to model A.  Non-deterministic, press the clear cache button before generating to get a different result.'
+    description = 'Adds the capabilities of model B to model A.'
     input_models = 2
     input_sliders = 2
     slid_a_info = "dropout rate"
@@ -202,11 +202,11 @@ class PowerUp(CalcMode):
     slid_b_info = "addition multiplier"
     slid_b_config = (-1, 4, 0.01)
 
-    def create_recipe(key, model_a, model_b, model_c, alpha=0, beta=0, **kwargs):
+    def create_recipe(key, model_a, model_b, model_c, alpha=0, beta=0, seed=0, **kwargs):
         a = opr.LoadTensor(key,model_a)
         b = opr.LoadTensor(key,model_b)
 
-        deltahat = opr.PowerUp(key, alpha, a, b)
+        deltahat = opr.PowerUp(key, alpha, seed, a, b)
         deltahat.cache()
 
         res = opr.Multiply(key, beta, deltahat)

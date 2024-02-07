@@ -162,9 +162,10 @@ class Similarities(Extract):
 
 
 class PowerUp(Operation):
-    def __init__(self,key,alpha,*sources):
+    def __init__(self,key,alpha, seed, *sources):
         super().__init__(key,*sources)
         self.alpha = alpha
+        self.seed = seed
 
     #https://github.com/martyn/safetensors-merge-supermario/blob/main/merge.py
     #https://arxiv.org/pdf/2311.03099.pdf
@@ -173,10 +174,15 @@ class PowerUp(Operation):
         # Calculate the delta of the weights
         a, b = resize_tensors(a, b)
         delta = b - a
+
         # Generate the mask m^t from Bernoulli distribution
-        m = torch.empty_like(delta[0],device=cmn.device(),dtype=torch.float32).uniform_(0,1) < self.alpha
+        rngenerator = torch.Generator(device=cmn.device())
+        rngenerator.manual_seed(self.seed)
+        m = torch.empty_like(delta,device=cmn.device(),dtype=cmn.dtype()).uniform_(0,1,generator=rngenerator) < self.alpha
+
         # Apply the mask to the delta to get δ̃^t
         delta_tilde = m * delta
+        
         # Scale the masked delta by the dropout rate to get δ̂^t
         delta_hat = delta_tilde / (1 - self.alpha)
         return delta_hat
