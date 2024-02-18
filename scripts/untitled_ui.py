@@ -173,7 +173,7 @@ def on_ui_tabs():
                 with gr.Accordion(label='Include/Exclude/Discard',open=False):
                     with gr.Row():
                         with gr.Column():
-                            clude = gr.Textbox(max_lines=4,label='Include/Exclude:',info='Entered targets will remain as model_a when set to \'Exclude\', and will be the only ones to be merged if set to \'Include\'. Separate with withspace.',value='first_stage_model\nclip.emb',lines=4,scale=4)
+                            clude = gr.Textbox(max_lines=4,label='Include/Exclude:',info='Entered targets will remain as model_a when set to \'Exclude\', and will be the only ones to be merged if set to \'Include\'. Separate with withspace.',value='clip.emb',lines=4,scale=4)
                             clude_mode = gr.Radio(label="",info="",choices=["Exclude",("Include exclusively",'include')],value='Exclude',min_width=300,scale=1)
                         discard = gr.Textbox(visible = False, max_lines=5,label='Discard:',info="Targets will be removed from the model, only applies to autosaved models. Separate with whitespace.",value='model_ema',lines=5,scale=1)
 
@@ -332,7 +332,7 @@ def on_ui_tabs():
                             output_gallery, _, _, output_html_log = create_output_panel('untitled_merger', shared.opts.outdir_txt2img_samples)
 
                         with gr.Row(equal_height=False):
-                            with gr.Accordion('Generation info',open=False,scale=3):
+                            with gr.Accordion(label='Generation info',open=False):
                                 infotext = gr.HTML(elem_id=f'html_info_{gen_elem_id}', elem_classes="infotext",scale=3)
                             gen_button = gr.Button(value='Gen',variant='primary',scale=1)
 

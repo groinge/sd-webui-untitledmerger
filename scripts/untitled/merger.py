@@ -151,7 +151,7 @@ def create_tasks(progress, calcmode, keys, assigned_keys, discard_keys,checkpoin
     n = 0
     for key in keys:
         if key in discard_keys:continue
-        elif key in SKIP_KEYS or 'model_ema' in key:
+        elif key in SKIP_KEYS or 'model_ema' in key or 'first_stage_model' in key:
             tasks.append(oper.LoadTensor(key,cmn.primary))
         elif key in assigned_keys.keys():
             n += 1

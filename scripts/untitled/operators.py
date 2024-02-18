@@ -240,6 +240,25 @@ class InterpolateDifference(Operation):
         res = a * (1 - interpolated_mask) + b * interpolated_mask
         return res
 
+class WeightSumCutoff(Operation):
+    def __init__(self,key,alpha, beta, gamma, *sources):
+        super().__init__(key,*sources)
+        self.alpha = alpha
+        self.beta = beta
+        self.gamma = gamma
+
+    def oper(self, a, b):
+        delta = torch.abs(a - b)
+
+        diff = (torch.max(delta) - delta) / torch.max(delta)
+        diffn = torch.nan_to_num(diff)
+
+        mean = torch.mean(diffn,0,True) 
+        mask = torch.logical_and(mean < self.beta,self.gamma < mean)
+        mul = self.alpha*mask
+
+        res = a * (1 - mul) + b * mul
+        return res
 #The cache
 tensor_size = lambda x: x.element_size() * x.nelement()
 
